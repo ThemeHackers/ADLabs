@@ -78,3 +78,28 @@ To prevent port conflicts on the host, each lab operates on isolated subnet spac
 > [!WARNING]
 > Only activate **one lab tunnel at a time** in your WireGuard Client to prevent routing and DNS resolution conflicts on your host.
 
+---
+
+## 4. How to Manage & Provision Labs
+
+You can use the unified management script **`run_provisioning.py`** to start, stop, clean up, and provision all labs.
+
+### Interactive Mode (Recommended)
+Simply run the script without any arguments to open the interactive CLI manager menu:
+```bash
+python run_provisioning.py
+```
+This menu allows you to:
+- Deploy and provision all 10 labs at once.
+- **Select a specific lab to deploy and provision** (highly recommended if you have limited RAM/CPU resources).
+- Stop all or specific active labs.
+- Clean up all or specific labs (stops containers and deletes local database/AD state volumes).
+
+### Non-Interactive Command-Line Mode
+You can also automate lab management by passing flags:
+* **Deploy All Labs**: `python run_provisioning.py --all`
+* **Deploy a Specific Lab**: `python run_provisioning.py --lab <index_or_name>` (e.g., `python run_provisioning.py --lab 8` or `python run_provisioning.py --lab laps-lab`)
+* **Stop All Labs**: `python run_provisioning.py --stop-all`
+* **Stop a Specific Lab**: `python run_provisioning.py --stop <index_or_name>`
+* **Clean All Labs (Stops & Removes volumes)**: `python run_provisioning.py --clean-all`
+* **Clean a Specific Lab**: `python run_provisioning.py --clean <index_or_name>`
