@@ -30,7 +30,7 @@ def print_error(msg):
     print(f"{RED}{BOLD}[x] {msg}{RESET}")
 
 def print_header(msg):
-    print(f"\n{MAGENTA}{BOLD}=== {msg} ==={RESET}")
+    print(f"\n{MAGENTA}{BOLD}--- {msg} ---{RESET}")
 
 def run_cmd(cmd, check=True):
     print_info(f"Executing: {' '.join(cmd)}")
@@ -55,6 +55,17 @@ def wait_for_healthy(container_name, timeout=120):
             return True
         time.sleep(5)
     print_warning(f"Timeout waiting for {container_name} to become healthy. Continuing anyway...")
+    return False
+
+def wait_for_postgres(container_name, timeout=30):
+    print_info(f"Waiting for {container_name} to accept connections...")
+    for _ in range(timeout // 2):
+        res = subprocess.run(["docker", "exec", "-u", "postgres", container_name, "pg_isready"], capture_output=True, text=True)
+        if res.returncode == 0:
+            print_success(f"{container_name} is ready.")
+            return True
+        time.sleep(2)
+    print_warning(f"Could not verify {container_name} readiness. Proceeding anyway...")
     return False
 
 def process_wg_config(src_path, dest_path):
@@ -103,7 +114,30 @@ def process_generated_creds(src_container, dest_dir):
 def provision_lab1(base_dir, script_path):
     print_header("Provisioning Lab 1 (oscp-network-pivot-lab)")
     run_cmd(["docker", "exec", "perimeter-nginx-ui", "sh", "-c", "echo 'OSCP{foothold_perimeter_breached}' > /var/flag.txt"], check=False)
-    run_cmd(["docker", "exec", "perimeter-nginx-ui", "sh", "-c", "echo 'ad_audit_user:AuditServicePass2026!' > /tmp/domain_hint.txt"], check=False)
+    
+  
+    run_cmd(["docker", "exec", "perimeter-nginx-ui", "sh", "-c", "mkdir -p /var/www/html && printf '[database]\\ndb_host = 10.20.20.20\\ndb_port = 5432\\ndb_user = postgres\\ndb_pass = DB_Prod_Admin_SuperSecure_Pass2026!\\ndb_name = production\\n' > /var/www/html/db_settings.conf"], check=False)
+    run_cmd(["docker", "exec", "perimeter-nginx-ui", "sh", "-c", "printf '[database]\\ndb_host = 10.20.20.20\\ndb_port = 5432\\ndb_user = postgres\\ndb_pass = DB_Prod_Admin_SuperSecure_Pass2026!\\ndb_name = production\\n' > /tmp/db_config.txt"], check=False)
+    
+   
+    print_info("Waiting for internal-postgres-db to accept connections...")
+    db_ready = False
+    for _ in range(15):
+        res = subprocess.run(["docker", "exec", "-u", "postgres", "internal-postgres-db", "pg_isready"], capture_output=True, text=True)
+        if res.returncode == 0:
+            db_ready = True
+            print_success("internal-postgres-db is ready.")
+            break
+        time.sleep(2)
+
+    if db_ready:
+        run_cmd(["docker", "exec", "-u", "postgres", "internal-postgres-db", "psql", "-d", "postgres", "-c", "CREATE TABLE IF NOT EXISTS ad_sync_credentials (id SERIAL PRIMARY KEY, service_name VARCHAR(100), ad_username VARCHAR(100), ad_password VARCHAR(100), description TEXT);"], check=False)
+        run_cmd(["docker", "exec", "-u", "postgres", "internal-postgres-db", "psql", "-d", "postgres", "-c", "INSERT INTO ad_sync_credentials (service_name, ad_username, ad_password, description) VALUES ('LDAP User Sync', 'l1_j.doe', 'SimplePass2026!', 'AD Bind account for synchronizing users');"], check=False)
+    else:
+        print_warning("Could not verify internal-postgres-db readiness. Attempting queries anyway...")
+        run_cmd(["docker", "exec", "-u", "postgres", "internal-postgres-db", "psql", "-d", "postgres", "-c", "CREATE TABLE IF NOT EXISTS ad_sync_credentials (id SERIAL PRIMARY KEY, service_name VARCHAR(100), ad_username VARCHAR(100), ad_password VARCHAR(100), description TEXT);"], check=False)
+        run_cmd(["docker", "exec", "-u", "postgres", "internal-postgres-db", "psql", "-d", "postgres", "-c", "INSERT INTO ad_sync_credentials (service_name, ad_username, ad_password, description) VALUES ('LDAP User Sync', 'l1_j.doe', 'SimplePass2026!', 'AD Bind account for synchronizing users');"], check=False)
+
     run_cmd(["docker", "cp", script_path, "ad-forest-parent:/tmp/configure_ad.py"])
     run_cmd(["docker", "exec", "ad-forest-parent", "python3", "/tmp/configure_ad.py", "--role", "parent", "--realm", "MEGACORP.LOCAL", "--user-prefix", "l1_"])
     run_cmd(["docker", "cp", script_path, "ad-forest-child:/tmp/configure_ad.py"])
@@ -147,6 +181,83 @@ def provision_lab4(base_dir, script_path):
         "--configfile=/samba/etc/smb.conf"
     ], check=False)
 
+ 
+    res_sid = run_cmd(["docker", "exec", "dc-forestb", "python3", "-c",
+                       "import samba, samba.param, samba.samdb, samba.ndr, samba.dcerpc.security; "
+                       "lp=samba.param.LoadParm(); lp.load('/samba/etc/smb.conf'); "
+                       "samdb=samba.samdb.SamDB('/samba/private/sam.ldb', lp=lp); "
+                       "res=samdb.search(expression='sAMAccountName=l4b_student'); "
+                       "sid=samba.ndr.ndr_unpack(samba.dcerpc.security.dom_sid, bytes(res[0]['objectSid'][0])); "
+                       "print(str(sid))"])
+    student_sid = res_sid.stdout.strip()
+    print_info(f"Retrieved Forest B student SID: {student_sid}")
+
+    run_cmd(["docker", "exec", "dc-foresta", "python3", "-c", f"""
+import samba, samba.param, samba.samdb, samba.dsdb, samba.ndr
+from ldb import Message, MessageElement, FLAG_MOD_ADD, Dn
+import samba.dcerpc.security as security
+
+lp = samba.param.LoadParm()
+lp.load('/samba/etc/smb.conf')
+samdb = samba.samdb.SamDB('/samba/private/sam.ldb', lp=lp)
+
+
+try:
+    samdb.newgroup('l4a_helpdesk')
+    print('Created group l4a_helpdesk')
+except Exception:
+    pass
+
+
+fsp_dn = 'CN={student_sid},CN=ForeignSecurityPrincipals,' + samdb.domain_dn()
+try:
+    msg = Message()
+    msg.dn = Dn(samdb, fsp_dn)
+    msg['objectClass'] = MessageElement('foreignSecurityPrincipal', FLAG_MOD_ADD, 'objectClass')
+    samdb.add(msg)
+    print('Created FSP: ' + fsp_dn)
+except Exception as e:
+    print('FSP already exists or error: ' + str(e))
+
+
+try:
+    samdb.add_remove_group_members('l4a_helpdesk', [fsp_dn], add=True)
+    print('Added FSP to l4a_helpdesk')
+except Exception as e:
+    print('Failed to add FSP to group: ' + str(e))
+
+
+try:
+    res_da = samdb.search(expression='sAMAccountName=Domain Admins')
+    da_dn = res_da[0].dn
+    
+    res_gp = samdb.search(expression='sAMAccountName=l4a_helpdesk')
+    gp_sid = samba.ndr.ndr_unpack(security.dom_sid, bytes(res_gp[0]['objectSid'][0]))
+    
+    res_sd = samdb.search(base=da_dn, attrs=['nTSecurityDescriptor'])
+    sd = samba.ndr.ndr_unpack(security.descriptor, bytes(res_sd[0]['nTSecurityDescriptor'][0]))
+    
+    new_ace = security.ace()
+    new_ace.type = security.SEC_ACE_TYPE_ACCESS_ALLOWED
+    new_ace.flags = 0
+    new_ace.access_mask = security.SEC_GENERIC_WRITE
+    new_ace.trustee = gp_sid
+    
+    aces = list(sd.dacl.aces) if sd.dacl and sd.dacl.aces else []
+    aces.append(new_ace)
+    sd.dacl.aces = aces
+    sd.dacl.num_aces = len(aces)
+    
+    msg = Message()
+    msg.dn = da_dn
+    from ldb import FLAG_MOD_REPLACE
+    msg['nTSecurityDescriptor'] = MessageElement(samba.ndr.ndr_pack(sd), FLAG_MOD_REPLACE, 'nTSecurityDescriptor')
+    samdb.modify(msg)
+    print('Granted l4a_helpdesk GenericWrite over Domain Admins')
+except Exception as e:
+    print('Failed to grant ACL: ' + str(e))
+"""])
+
 def provision_lab5(base_dir, script_path):
     print_header("Provisioning Lab 5 (gpo-admin-pivot-lab)")
     run_cmd(["docker", "cp", script_path, "gpo-dc:/tmp/configure_ad.py"])
@@ -157,6 +268,60 @@ def provision_lab5(base_dir, script_path):
     run_cmd(["docker", "exec", "gpo-dc", "chmod", "-R", "777", "/samba/state/sysvol/gpolab.local/scripts"])
     run_cmd(["docker", "exec", "gpo-dc", "sh", "-c", "echo '#!/bin/sh\necho \"System update checked\"' > /samba/state/sysvol/gpolab.local/scripts/update.sh"])
     run_cmd(["docker", "exec", "gpo-dc", "chmod", "+x", "/samba/state/sysvol/gpolab.local/scripts/update.sh"])
+    
+   
+    print_info("Creating authentic GPO GUID folder structure...")
+    gpo_guid = "{3137632E-FA86-4d0f-A02F-A5C94B3C53F7}"
+    gpo_path = f"/samba/state/sysvol/gpolab.local/Policies/{gpo_guid}/Machine/Preferences/Groups"
+    run_cmd(["docker", "exec", "gpo-dc", "mkdir", "-p", gpo_path], check=False)
+    
+   
+    groups_xml = """<?xml version="1.0" encoding="utf-8"?>
+<Groups clsid="{3125E73C-5169-448C-889E-1ECC56BAA9A4}">
+  <User clsid="{DF5F1855-0E2C-4586-819E-E8C4B5D487E0}" name="LocalAdmin" image="2" changed="2026-01-01 00:00:00" uid="{GUID}" userContext="0" removePolicy="0">
+    <Properties action="U" newName="" fullName="" description="" cpassword="VABlAHMAdABQAGEAcwBzADIAMAAyADYAIQA=" changeLogon="0" noChange="1" neverExpires="1" acctDisabled="0" subAuthority="" />
+  </User>
+</Groups>"""
+    run_cmd(["docker", "exec", "gpo-dc", "sh", "-c", f"cat > {gpo_path}/Groups.xml << 'EOF'\n{groups_xml}\nEOF"], check=False)
+    print_success("Authentic GPO Groups.xml injected with cpassword attribute")
+    
+ 
+    print_info("Registering computer account ws-gpo-client$ in Active Directory...")
+    run_cmd(["docker", "exec", "gpo-dc", "samba-tool", "computer", "create", "ws-gpo-client", "--configfile=/samba/etc/smb.conf"], check=False)
+    
+    print_info("Configuring /etc/krb5.conf inside gpo-client-sim...")
+    krb5_conf = """[libdefaults]
+    default_realm = GPOLAB.LOCAL
+    dns_lookup_realm = false
+    dns_lookup_kdc = true
+    rdns = false
+
+[realms]
+    GPOLAB.LOCAL = {
+        kdc = 10.104.10.10
+        admin_server = 10.104.10.10
+    }
+
+[domain_realm]
+    .gpolab.local = GPOLAB.LOCAL
+    gpolab.local = GPOLAB.LOCAL
+"""
+    run_cmd(["docker", "exec", "gpo-client-sim", "sh", "-c", "cat > /etc/krb5.conf << 'EOF'\n" + krb5_conf + "EOF"], check=False)
+    
+    print_info("Exporting computer keytab for ws-gpo-client$...")
+    keytab_export = run_cmd(["docker", "exec", "gpo-dc", "samba-tool", "domain", "exportkeytab", "/tmp/ws-gpo-client.keytab", "--principal=ws-gpo-client$@GPOLAB.LOCAL", "--configfile=/samba/etc/smb.conf"], check=False)
+    
+
+    if keytab_export.returncode == 0:
+        print_info("Copying keytab to gpo-client-sim container...")
+        copy_result = run_cmd(["docker", "cp", "gpo-dc:/tmp/ws-gpo-client.keytab", "/tmp/ws-gpo-client.keytab"], check=False)
+        if copy_result.returncode == 0:
+            run_cmd(["docker", "cp", "/tmp/ws-gpo-client.keytab", "gpo-client-sim:/etc/krb5.keytab"], check=False)
+            print_success("Domain joined workstation gpo-client-sim configured with krb5.conf and keytab")
+        else:
+            print_warning("Failed to copy keytab from container - krb5.conf configured but keytab setup incomplete")
+    else:
+        print_warning("Keytab export failed - krb5.conf configured but keytab setup incomplete (keytab export may not be supported for computer accounts in this Samba version)")
 
 def provision_lab6(base_dir, script_path):
     print_header("Provisioning Lab 6 (rbcd-lab)")
@@ -169,12 +334,39 @@ def provision_lab7(base_dir, script_path):
     run_cmd(["docker", "cp", "sql-pivot-lab/configure_sql.py", "sql-dc:/tmp/configure_sql.py"])
     run_cmd(["docker", "exec", "sql-dc", "python3", "/tmp/configure_sql.py"])
     run_cmd(["docker", "exec", "sql-dc", "samba-tool", "user", "setpassword", "Administrator", "--newpassword=SQLPivotAdminPass2026!", "--configfile=/samba/etc/smb.conf"])
+    
+
+    wait_for_postgres("sql-back")
+    wait_for_postgres("sql-front")
+    
+ 
+    run_cmd(["docker", "exec", "-u", "postgres", "sql-back", "psql", "-d", "postgres", "-c", "CREATE TABLE IF NOT EXISTS secret_flag (id SERIAL PRIMARY KEY, flag_val VARCHAR(100));"], check=False)
+    run_cmd(["docker", "exec", "-u", "postgres", "sql-back", "psql", "-d", "postgres", "-c", "INSERT INTO secret_flag (flag_val) VALUES ('OSCP{sql_database_link_pivot_won}');"], check=False)
+    
+
+    run_cmd(["docker", "exec", "-u", "postgres", "sql-front", "psql", "-d", "postgres", "-c", "CREATE EXTENSION IF NOT EXISTS postgres_fdw;"], check=False)
+    run_cmd(["docker", "exec", "-u", "postgres", "sql-front", "psql", "-d", "postgres", "-c", "CREATE SERVER IF NOT EXISTS sql_back_link FOREIGN DATA WRAPPER postgres_fdw OPTIONS (host '10.106.10.20', port '5432', dbname 'postgres');"], check=False)
+    run_cmd(["docker", "exec", "-u", "postgres", "sql-front", "psql", "-d", "postgres", "-c", "CREATE USER MAPPING IF NOT EXISTS FOR postgres SERVER sql_back_link OPTIONS (user 'postgres', password 'SuperSecureBackPass2026!');"], check=False)
+    run_cmd(["docker", "exec", "-u", "postgres", "sql-front", "psql", "-d", "postgres", "-c", "CREATE FOREIGN TABLE IF NOT EXISTS remote_flag (flag_val VARCHAR(100)) SERVER sql_back_link OPTIONS (schema_name 'public', table_name 'secret_flag');"], check=False)
 
 def provision_lab8(base_dir, script_path):
     print_header("Provisioning Lab 8 (laps-lab)")
     run_cmd(["docker", "cp", "laps-lab/configure_laps.py", "laps-dc:/tmp/configure_laps.py"])
     run_cmd(["docker", "exec", "laps-dc", "python3", "/tmp/configure_laps.py"])
     run_cmd(["docker", "exec", "laps-dc", "samba-tool", "user", "setpassword", "Administrator", "--newpassword=LAPSAdminPass2026!", "--configfile=/samba/etc/smb.conf"])
+    
+   
+    print_info("Exporting Domain Admin keytab from laps-dc...")
+    run_cmd(["docker", "exec", "laps-dc", "samba-tool", "domain", "exportkeytab", "/tmp/admin.keytab", "--principal=Administrator@LAPSLAB.LOCAL", "--configfile=/samba/etc/smb.conf"], check=False)
+    
+    print_info("Obtaining Kerberos ticket cache for Administrator...")
+    run_cmd(["docker", "exec", "laps-dc", "kinit", "-k", "-t", "/tmp/admin.keytab", "-c", "/tmp/krb5cc_domain_admin", "Administrator@LAPSLAB.LOCAL"], check=False)
+    
+    print_info("Copying ticket cache from laps-dc to host...")
+    run_cmd(["docker", "cp", "laps-dc:/tmp/krb5cc_domain_admin", "/tmp/krb5cc_domain_admin"], check=False)
+    
+
+    print_info("Kerberos ticket cache available on host at /tmp/krb5cc_domain_admin")
 
 def provision_lab9(base_dir, script_path):
     print_header("Provisioning Lab 9 (esc8-relay-lab)")
@@ -189,9 +381,9 @@ def provision_lab10(base_dir, script_path):
     run_cmd(["docker", "exec", "deleg-dc", "samba-tool", "user", "setpassword", "Administrator", "--newpassword=DelegationAdminPass2026!", "--configfile=/samba/etc/smb.conf"])
 
 def deploy_lab(lab, base_dir, script_path):
-    print(f"\n{BLUE}{BOLD}==================================================={RESET}")
+    print(f"\n{BLUE}{BOLD}---------------------------------------------------{RESET}")
     print(f"{BLUE}{BOLD}🚀 Deploying & Provisioning: {lab['dir']}{RESET}")
-    print(f"{BLUE}{BOLD}==================================================={RESET}")
+    print(f"{BLUE}{BOLD}---------------------------------------------------{RESET}")
     
 
     os.chdir(os.path.join(base_dir, lab["dir"]))
@@ -232,7 +424,7 @@ def clean_lab(lab, base_dir):
 
 def show_banner():
     banner = f"""{CYAN}{BOLD}
-======================================================
+------------------------------------------------------
  █████╗ ██████╗ ██╗      █████╗ ██████╗ ███████╗
 ██╔══██╗██╔══██╗██║     ██╔══██╗██╔══██╗██╔════╝
 ███████║██║  ██║██║     ███████║██████╔╝███████╗
@@ -240,7 +432,7 @@ def show_banner():
 ██║  ██║██████╔╝███████╗██║  ██║██████╔╝███████║
 ╚═╝  ╚═╝╚═════╝ ╚══════╝╚═╝  ╚═╝╚═════╝ ╚══════╝
 {RESET}{BLUE} Active Directory Pentesting Lab Suite Manager{RESET}
-{CYAN}======================================================{RESET}"""
+{CYAN}------------------------------------------------------{RESET}"""
     print(banner)
 
 def main():
@@ -401,7 +593,7 @@ def main():
         print(f" {RED}🧹{RESET} {BOLD}[5]{RESET} Clean {BOLD}ALL{RESET} labs (Stop & Remove local docker volumes)")
         print(f" {RED}🗑️ {RESET} {BOLD}[6]{RESET} Clean a specific lab (Stop & Remove volumes)")
         print(f" {BLUE}🚪{RESET} {BOLD}[7]{RESET} Exit")
-        print(f"{CYAN}======================================================{RESET}")
+        print(f"{CYAN}------------------------------------------------------{RESET}")
         
         choice = input(f"{BOLD}Enter choice (1-7): {RESET}").strip()
         
