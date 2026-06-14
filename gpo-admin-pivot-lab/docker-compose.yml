@@ -62,7 +62,9 @@ services:
     volumes:
       - gpo-samba-rw:/sysvol
     command: >
-      bash -c "echo 'OSCP{gpo_workstation_pivot_achieved}' > /root/flag.txt &&
+      bash -c "apt-get update && apt-get install -y iproute2 procps &&
+               (ip route add 10.252.5.0/24 via 10.104.20.150 || true) &&
+               echo 'OSCP{gpo_workstation_pivot_achieved}' > /root/flag.txt &&
                mkdir -p /var/log &&
                echo 'Backup task completed by domain_admin:GPOLabAdminPass2026!' > /var/log/backup.log &&
                echo 'Workstation agent started. Waiting for policy script...' &&

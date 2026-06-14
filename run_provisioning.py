@@ -192,40 +192,22 @@ def provision_lab4(base_dir, script_path):
     student_sid = res_sid.stdout.strip()
     print_info(f"Retrieved Forest B student SID: {student_sid}")
 
-    run_cmd(["docker", "exec", "dc-foresta", "python3", "-c", f"""
-import samba, samba.param, samba.samdb, samba.dsdb, samba.ndr
-from ldb import Message, MessageElement, FLAG_MOD_ADD, Dn
+  
+    run_cmd(["docker", "exec", "dc-foresta", "samba-tool", "group", "add", "l4a_helpdesk", "--configfile=/samba/etc/smb.conf"], check=False)
+    
+    run_cmd(["docker", "exec", "dc-foresta", "samba-tool", "group", "addmembers", "l4a_helpdesk", student_sid, "--configfile=/samba/etc/smb.conf"], check=False)
+
+    temp_script_path = os.path.join(base_dir, "temp_trust_acl.py")
+    with open(temp_script_path, "w") as f:
+        f.write(f"""import samba, samba.param, samba.samdb, samba.dsdb, samba.ndr
+import ldb
+from ldb import Message, MessageElement, Dn
 import samba.dcerpc.security as security
+from samba.auth import system_session
 
 lp = samba.param.LoadParm()
 lp.load('/samba/etc/smb.conf')
-samdb = samba.samdb.SamDB('/samba/private/sam.ldb', lp=lp)
-
-
-try:
-    samdb.newgroup('l4a_helpdesk')
-    print('Created group l4a_helpdesk')
-except Exception:
-    pass
-
-
-fsp_dn = 'CN={student_sid},CN=ForeignSecurityPrincipals,' + samdb.domain_dn()
-try:
-    msg = Message()
-    msg.dn = Dn(samdb, fsp_dn)
-    msg['objectClass'] = MessageElement('foreignSecurityPrincipal', FLAG_MOD_ADD, 'objectClass')
-    samdb.add(msg)
-    print('Created FSP: ' + fsp_dn)
-except Exception as e:
-    print('FSP already exists or error: ' + str(e))
-
-
-try:
-    samdb.add_remove_group_members('l4a_helpdesk', [fsp_dn], add=True)
-    print('Added FSP to l4a_helpdesk')
-except Exception as e:
-    print('Failed to add FSP to group: ' + str(e))
-
+samdb = samba.samdb.SamDB('/samba/private/sam.ldb', lp=lp, session_info=system_session())
 
 try:
     res_da = samdb.search(expression='sAMAccountName=Domain Admins')
@@ -256,7 +238,11 @@ try:
     print('Granted l4a_helpdesk GenericWrite over Domain Admins')
 except Exception as e:
     print('Failed to grant ACL: ' + str(e))
-"""])
+""")
+    run_cmd(["docker", "cp", temp_script_path, "dc-foresta:/tmp/temp_trust_acl.py"])
+    run_cmd(["docker", "exec", "dc-foresta", "python3", "/tmp/temp_trust_acl.py"])
+    if os.path.exists(temp_script_path):
+        os.remove(temp_script_path)
 
 def provision_lab5(base_dir, script_path):
     print_header("Provisioning Lab 5 (gpo-admin-pivot-lab)")
@@ -288,6 +274,7 @@ def provision_lab5(base_dir, script_path):
  
     print_info("Registering computer account ws-gpo-client$ in Active Directory...")
     run_cmd(["docker", "exec", "gpo-dc", "samba-tool", "computer", "create", "ws-gpo-client", "--configfile=/samba/etc/smb.conf"], check=False)
+    run_cmd(["docker", "exec", "gpo-dc", "samba-tool", "user", "setpassword", "ws-gpo-client$", "--newpassword=GPOLabAdminPass2026!", "--configfile=/samba/etc/smb.conf"], check=False)
     
     print_info("Configuring /etc/krb5.conf inside gpo-client-sim...")
     krb5_conf = """[libdefaults]
