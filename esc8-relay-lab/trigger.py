@@ -25,7 +25,7 @@ class TriggerHandler(http.server.BaseHTTPRequestHandler):
             def run_auth():
                 subprocess.run([
                     "smbclient", f"//{ip}/share",
-                    "-U", "Administrator%ESC8LabAdminPass2026!",
+                    "-U", "ESC8-DC$%ESC8DC$Pass2026!",
                     "-c", "ls"
                 ], capture_output=True)
 

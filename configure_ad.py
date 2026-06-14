@@ -134,30 +134,45 @@ def main():
 
         create_user_if_not_exists(samdb, u_doe, "SimplePass2026!", args.realm)
 
-        jdoe_sid, _ = get_object_sid(samdb, f"sAMAccountName={u_doe}")
-        _, svcb_dn  = get_object_sid(samdb, f"sAMAccountName={u_backups}")
+        if prefix == "l1_":
+          
+            svcb_sid, _ = get_object_sid(samdb, f"sAMAccountName={u_backups}")
+            _, svcd_dn = get_object_sid(samdb, f"sAMAccountName={u_delegate}")
+            if svcb_sid and svcd_dn:
+                grant_ace_on_object(samdb, svcd_dn, svcb_sid, security.SEC_GENERIC_WRITE)
+                print(f"ACL: {u_backups} has GenericWrite over {u_delegate} (Lab 1 Exploit Chain)", flush=True)
+        elif prefix == "l5_":
+        
+            operator_sid, _ = get_object_sid(samdb, "sAMAccountName=l5_operator")
+            adminsdh_dn = Dn(samdb, f"CN=AdminSDHolder,CN=System,{domain_dn}")
+            if operator_sid and adminsdh_dn:
+                grant_ace_on_object(samdb, adminsdh_dn, operator_sid, security.SEC_STD_WRITE_DAC)
+                print("ACL: l5_operator has WriteDACL over AdminSDHolder (Lab 5 Exploit Chain)", flush=True)
+        else:
+            jdoe_sid, _ = get_object_sid(samdb, f"sAMAccountName={u_doe}")
+            _, svcb_dn  = get_object_sid(samdb, f"sAMAccountName={u_backups}")
 
-        if jdoe_sid and svcb_dn:
-            grant_ace_on_object(samdb, svcb_dn, jdoe_sid, security.SEC_GENERIC_ALL)
-            print(f"ACL: {u_doe} has GenericAll over {u_backups} (Password Reset / Targeted Kerberoast)", flush=True)
+            if jdoe_sid and svcb_dn:
+                grant_ace_on_object(samdb, svcb_dn, jdoe_sid, security.SEC_GENERIC_ALL)
+                print(f"ACL: {u_doe} has GenericAll over {u_backups} (Password Reset / Targeted Kerberoast)", flush=True)
 
-        run_samba_tool(["group", "add", "HelpDesk"])
-        run_samba_tool(["group", "addmembers", "HelpDesk", u_doe])
+            run_samba_tool(["group", "add", "HelpDesk"])
+            run_samba_tool(["group", "addmembers", "HelpDesk", u_doe])
 
-        helpdesk_sid, _ = get_object_sid(samdb, "sAMAccountName=HelpDesk")
-        _, da_dn = get_object_sid(samdb, "sAMAccountName=Domain Admins")
-        if helpdesk_sid and da_dn:
-            grant_ace_on_object(samdb, da_dn, helpdesk_sid, security.SEC_GENERIC_WRITE)
-            print("ACL: HelpDesk has GenericWrite over Domain Admins (Self-Add Member)", flush=True)
+            helpdesk_sid, _ = get_object_sid(samdb, "sAMAccountName=HelpDesk")
+            _, da_dn = get_object_sid(samdb, "sAMAccountName=Domain Admins")
+            if helpdesk_sid and da_dn:
+                grant_ace_on_object(samdb, da_dn, helpdesk_sid, security.SEC_GENERIC_WRITE)
+                print("ACL: HelpDesk has GenericWrite over Domain Admins (Self-Add Member)", flush=True)
 
-        run_samba_tool(["group", "add", "IT-Support"])
-        run_samba_tool(["group", "addmembers", "IT-Support", u_doe])
+            run_samba_tool(["group", "add", "IT-Support"])
+            run_samba_tool(["group", "addmembers", "IT-Support", u_doe])
 
-        itsupport_sid, _ = get_object_sid(samdb, "sAMAccountName=IT-Support")
-        if itsupport_sid:
-            domain_dn_obj = Dn(samdb, domain_dn)
-            grant_ace_on_object(samdb, domain_dn_obj, itsupport_sid, security.SEC_STD_WRITE_DAC)
-            print("ACL: IT-Support has WriteDACL on Domain -> DCSync path via DACL rewrite", flush=True)
+            itsupport_sid, _ = get_object_sid(samdb, "sAMAccountName=IT-Support")
+            if itsupport_sid:
+                domain_dn_obj = Dn(samdb, domain_dn)
+                grant_ace_on_object(samdb, domain_dn_obj, itsupport_sid, security.SEC_STD_WRITE_DAC)
+                print("ACL: IT-Support has WriteDACL on Domain -> DCSync path via DACL rewrite", flush=True)
 
         print(f"=== 6. Creating Silver Ticket Target ({u_mssql} with SPN) ===", flush=True)
         create_user_if_not_exists(samdb, u_mssql, "MSSQLService2026!", args.realm)

@@ -25,4 +25,7 @@ run_tool(["spn", "add", "HTTP/esc8-web.esc8lab.local", "l9_svc_http"])
 run_tool(["user", "create", "l9_svc_enroll", "EnrollSvcPass123!", "--realm=ESC8LAB.LOCAL"])
 run_tool(["spn", "add", "HOST/esc8-enroll.esc8lab.local", "l9_svc_enroll"])
 
+
+run_tool(["user", "setpassword", "esc8-dc$", "--newpassword=ESC8DC$Pass2026!"])
+
 print("[+] ESC8 Lab configuration complete!")

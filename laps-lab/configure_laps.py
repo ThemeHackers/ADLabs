@@ -56,14 +56,22 @@ def grant_ace(target_dn, trustee_sid, access_mask):
         print(f"[!] grant_ace failed: {e}")
 
 
-print("=" * 50)
+print("-" * 50)
 print("LAPS Lab - Enhanced Configuration")
-print("=" * 50)
+print("-" * 50)
 
 run_tool(["domain", "passwordsettings", "set", "--complexity=off"])
 run_tool(["domain", "passwordsettings", "set", "--min-pwd-length=4"])
 run_tool(["domain", "passwordsettings", "set", "--history-length=0"])
 run_tool(["domain", "passwordsettings", "set", "--account-lockout-threshold=0"])
+
+
+try:
+  
+    print("[*] Skipping LAPS schema extension (not supported in this Samba version)")
+    print("[*] LAPS passwords will be stored in description/info attributes for simulation")
+except Exception as e:
+    print(f"[!] LAPS Schema setup failed: {e}")
 
 run_tool(["user", "create", "l8_audit_user", "AuditPass2026!", "--realm=LAPSLAB.LOCAL"])
 run_tool(["user", "create", "l8_it_helpdesk", "HelpdeskPass2026!", "--realm=LAPSLAB.LOCAL"])
@@ -73,6 +81,40 @@ run_tool(["spn", "add", "HTTP/monitor.lapslab.local:8080", "l8_svc_monitor"])
 run_tool(["computer", "create", "srv-finance"])
 run_tool(["computer", "create", "ws-admin"])
 run_tool(["computer", "create", "srv-backup"])
+
+
+try:
+    from ldb import FLAG_MOD_ADD
+    from samba.sddl import parse_sddl
+    import struct
+    
+    ws_sid, _ = get_sid("sAMAccountName=ws-admin$")
+    if ws_sid:
+        gmsa_dn = f"CN=l8_gmsa_svc,CN=Managed Service Accounts,{domain_dn}"
+        res = samdb.search(base=domain_dn, scope=SCOPE_SUBTREE, expression="sAMAccountName=l8_gmsa_svc$")
+        if not res:
+            sddl_str = f"O:SYG:SYD:(A;;CCDC;;;{ws_sid})"
+            sd = parse_sddl(sddl_str, security.dom_sid(samdb.get_domain_sid()))
+            
+            password_str = "GMSAPasswordSecret2026!"
+            pw_bytes = password_str.encode('utf-16-le')
+            managed_password_blob = struct.pack(f"<HHI{len(pw_bytes)}s", 1, 0, len(pw_bytes), pw_bytes)
+
+            msg = Message()
+            msg.dn = Dn(samdb, gmsa_dn)
+            msg["objectClass"] = MessageElement(["top", "person", "organizationalPerson", "user", "msDS-GroupManagedServiceAccount"], FLAG_MOD_ADD, "objectClass")
+            msg["cn"] = MessageElement("l8_gmsa_svc", FLAG_MOD_ADD, "cn")
+            msg["sAMAccountName"] = MessageElement("l8_gmsa_svc$", FLAG_MOD_ADD, "sAMAccountName")
+            msg["msDS-GroupMSAMembership"] = MessageElement(ndr_pack(sd), FLAG_MOD_ADD, "msDS-GroupMSAMembership")
+            msg["msDS-ManagedPassword"] = MessageElement(managed_password_blob, FLAG_MOD_ADD, "msDS-ManagedPassword")
+            msg["userAccountControl"] = MessageElement("4194304", FLAG_MOD_ADD, "userAccountControl")
+            
+            samdb.add(msg)
+            print("[+] Created gMSA l8_gmsa_svc$ with msDS-GroupMSAMembership and msDS-ManagedPassword")
+        else:
+            print("[+] gMSA l8_gmsa_svc$ already exists.")
+except Exception as e:
+    print(f"[!] gMSA creation failed: {e}")
 
 for computer, pwd in [
     ("srv-finance$", "FinanceSrvLocalAdminPass2026!"),
