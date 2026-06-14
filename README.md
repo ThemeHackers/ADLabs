@@ -87,8 +87,9 @@ If you prefer to connect to the WireGuard VPN directly inside your WSL2 Ubuntu t
    ```
 2. Copy the desired lab configuration file (e.g., for Lab 8):
    ```bash
-   sudo cp /mnt/c/Users/1com310568/Downloads/ADLabs/laps-lab/oscp-laps-lab.conf /etc/wireguard/wg0.conf
+   sudo cp /mnt/c/Users/<YOUR_USERNAME>/Downloads/ADLabs/laps-lab/oscp-laps-lab.conf /etc/wireguard/wg0.conf
    ```
+   Replace `<YOUR_USERNAME>` with your actual Windows username.
 3. Start the VPN connection:
    ```bash
    sudo wg-quick up wg0
