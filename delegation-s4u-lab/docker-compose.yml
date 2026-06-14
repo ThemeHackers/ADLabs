@@ -1,0 +1,83 @@
+services:
+  deleg-wg-gateway:
+    image: lscr.io/linuxserver/wireguard:latest
+    container_name: deleg-wg-gateway
+    cap_add:
+      - NET_ADMIN
+    environment:
+      - PUID=1000
+      - PGID=1000
+      - TZ=Asia/Bangkok
+      - SERVERURL=127.0.0.1
+      - SERVERPORT=51829
+      - PEERS=1
+      - PEERDNS=10.109.10.10
+      - INTERNAL_SUBNET=10.252.10.0/24
+      - ALLOWEDIPS=10.109.10.0/24,10.109.20.0/24
+    volumes:
+      - ./wireguard_deleg:/config
+    ports:
+      - 51829:51820/udp
+    networks:
+      ad-net: { ipv4_address: 10.109.10.150 }
+      db-net: { ipv4_address: 10.109.20.150 }
+    restart: unless-stopped
+
+  deleg-core-router:
+    image: debian:bullseye-slim
+    container_name: deleg-core-router
+    privileged: true
+    cap_add:
+      - NET_ADMIN
+    command: >
+      sh -c "apt-get update && apt-get install -y iptables iproute2 net-tools procps &&
+             sysctl -w net.ipv4.ip_forward=1 &&
+             iptables -t nat -A POSTROUTING -j MASQUERADE &&
+             sleep infinity"
+    networks:
+      ad-net: { ipv4_address: 10.109.10.254 }
+      db-net: { ipv4_address: 10.109.20.254 }
+    restart: always
+
+  deleg-dc:
+    image: linuxcrafts/samba-ad-dc:latest
+    container_name: deleg-dc
+    privileged: true
+    cap_add:
+      - NET_ADMIN
+    entrypoint: ["/bin/sh", "-c", "ip route add 10.109.20.0/24 via 10.109.10.254 || true; exec /samba-ad-dc"]
+    environment:
+      - DOMAIN=DELEGATELAB
+      - REALM=DELEGATELAB.LOCAL
+      - ADMIN_PASSWORD=DelegationAdminPass2026!
+    volumes:
+      - deleg-dc-data:/var/lib/samba
+    networks:
+      ad-net: { ipv4_address: 10.109.10.10 }
+    dns: 127.0.0.1
+    restart: unless-stopped
+
+  deleg-db:
+    image: debian:bullseye-slim
+    container_name: deleg-db
+    privileged: true
+    cap_add:
+      - NET_ADMIN
+    command: >
+      sh -c "apt-get update && apt-get install -y iproute2 procps python3 &&
+             ip route add 10.109.10.0/24 via 10.109.20.254 || true;
+             echo 'OSCP{constrained_delegation_s4u2self_success}' > /flag.txt &&
+             mkdir -p /var/www &&
+             echo 'Internal DB Console' > /var/www/index.html &&
+             cd /var/www &&
+             python3 -m http.server 80"
+    networks:
+      db-net: { ipv4_address: 10.109.20.20 }
+    restart: unless-stopped
+
+networks:
+  ad-net: { ipam: { config: [{ subnet: 10.109.10.0/24 }] } }
+  db-net: { ipam: { config: [{ subnet: 10.109.20.0/24 }] } }
+
+volumes:
+  deleg-dc-data:

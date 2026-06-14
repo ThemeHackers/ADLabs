@@ -1,0 +1,165 @@
+services:
+  mega-wg-gateway:
+    image: lscr.io/linuxserver/wireguard:latest
+    container_name: mega-wg-gateway
+    cap_add:
+      - NET_ADMIN
+    environment:
+      - PUID=1000
+      - PGID=1000
+      - TZ=Asia/Bangkok
+      - SERVERURL=127.0.0.1
+      - SERVERPORT=51821
+      - PEERS=1
+      - PEERDNS=10.101.10.10
+      - INTERNAL_SUBNET=10.252.2.0/24
+      - ALLOWEDIPS=10.101.10.0/24,10.101.20.0/24,10.101.30.0/24
+    volumes:
+      - ./wireguard_forest:/config
+    ports:
+      - 51821:51820/udp
+    networks:
+      parent-net: { ipv4_address: 10.101.10.150 }
+      child-net:  { ipv4_address: 10.101.20.150 }
+      tree-net:   { ipv4_address: 10.101.30.150 }
+    restart: unless-stopped
+
+
+  mega-router:
+    image: debian:bullseye-slim
+    container_name: mega-core-router
+    privileged: true
+    cap_add:
+      - NET_ADMIN
+
+    restart: always 
+    command: >
+      bash -c "echo 'Waiting for network...' && sleep 10 && 
+               apt-get update ; 
+               apt-get install -y iptables iproute2 procps iputils-ping net-tools ; 
+               sysctl -w net.ipv4.ip_forward=1 && 
+               iptables -t nat -A POSTROUTING -o eth0 -j MASQUERADE ; 
+               echo 'Router is ready.' && sleep infinity"
+    networks:
+      parent-net: { ipv4_address: 10.101.10.254 }
+      child-net:  { ipv4_address: 10.101.20.254 }
+      tree-net:   { ipv4_address: 10.101.30.254 }
+      mgmt-net:   { ipv4_address: 10.101.40.254 }
+
+
+  dc-parent:
+    image: linuxcrafts/samba-ad-dc:latest
+    container_name: mega-dc-parent
+    privileged: true
+    environment:
+      - DOMAIN=MEGACORP
+      - REALM=MEGACORP.LOCAL
+      - ADMIN_PASSWORD=ParentRootAdminPass2026!
+    volumes:
+      - samba-parent:/var/lib/samba
+    networks:
+      parent-net: { ipv4_address: 10.101.10.10 }
+    dns: 127.0.0.1
+    restart: unless-stopped
+
+
+  dc-child:
+    image: linuxcrafts/samba-ad-dc:latest
+    container_name: mega-dc-child
+    privileged: true
+    environment:
+      - DOMAIN=HQ
+      - REALM=HQ.MEGACORP.LOCAL
+      - ADMIN_PASSWORD=ChildSubAdminPass2026!
+    volumes:
+      - samba-child:/var/lib/samba
+    networks:
+      child-net: { ipv4_address: 10.101.20.10 }
+    dns: 127.0.0.1
+    restart: unless-stopped
+
+
+  dc-tree:
+    image: linuxcrafts/samba-ad-dc:latest
+    container_name: mega-dc-tree
+    privileged: true
+    environment:
+      - DOMAIN=CYBERTECH
+      - REALM=CYBERTECH.LOCAL
+      - ADMIN_PASSWORD=TreeAcquisitionPass2026!
+    volumes:
+      - samba-tree:/var/lib/samba
+    networks:
+      tree-net: { ipv4_address: 10.101.30.10 }
+    dns: 127.0.0.1
+    restart: unless-stopped
+
+  ad-forest-provisioner:
+    image: linuxcrafts/samba-ad-dc:latest
+    entrypoint: ["/bin/sh", "-c"]
+    container_name: ad-forest-provisioner
+    depends_on:
+      - dc-parent
+      - dc-child
+      - dc-tree
+    networks:
+      parent-net: { ipv4_address: 10.101.10.200 }
+      child-net:  { ipv4_address: 10.101.20.200 }
+      tree-net:   { ipv4_address: 10.101.30.200 }
+    volumes:
+      - samba-parent:/parent_samba
+      - samba-child:/child_samba
+      - samba-tree:/tree_samba
+    command: >
+      "sleep 55 &&
+        echo '=== 1. Disabling Password Policy Complexity on all Domains ===' &&
+        samba-tool domain passwordsettings set --complexity=off -H ldap://10.101.10.10 -U Administrator --password=ParentRootAdminPass2026! &&
+        samba-tool domain passwordsettings set --min-pwd-length=4 -H ldap://10.101.10.10 -U Administrator --password=ParentRootAdminPass2026! &&
+        samba-tool domain passwordsettings set --complexity=off -H ldap://10.101.20.10 -U Administrator --password=ChildSubAdminPass2026! &&
+        samba-tool domain passwordsettings set --min-pwd-length=4 -H ldap://10.101.20.10 -U Administrator --password=ChildSubAdminPass2026! &&
+        samba-tool domain passwordsettings set --complexity=off -H ldap://10.101.30.10 -U Administrator --password=TreeAcquisitionPass2026! &&
+        samba-tool domain passwordsettings set --min-pwd-length=4 -H ldap://10.101.30.10 -U Administrator --password=TreeAcquisitionPass2026! &&
+
+        echo '=== 2. Creating AS-REP Roasting vulnerable accounts on Parent DC ===' &&
+        samba-tool user create svc_backups BackupPassword123! -H ldap://10.101.10.10 -U Administrator --password=ParentRootAdminPass2026! --realm=MEGACORP.LOCAL &&
+        printf 'dn: CN=svc_backups,CN=Users,DC=megacorp,DC=local\nchangetype: modify\nreplace: userAccountControl\nuserAccountControl: 4194816\n' > /tmp/asrep.ldif &&
+        ldbmodify -H ldap://10.101.10.10 -U Administrator --password=ParentRootAdminPass2026! /tmp/asrep.ldif &&
+
+        echo '=== 3. Creating Kerberoasting Target User on Child DC ===' &&
+        samba-tool user create sql_service SQLServicePass123! -H ldap://10.101.20.10 -U Administrator --password=ChildSubAdminPass2026! --realm=HQ.MEGACORP.LOCAL &&
+        samba-tool spn add MSSQLSvc/sql-db.hq.megacorp.local:1433 sql_service -H ldap://10.101.20.10 -U Administrator --password=ChildSubAdminPass2026! &&
+
+        echo '=== 4. Creating Delegation Target User on Parent DC ===' &&
+        samba-tool user create svc_delegate DelegatePass123! -H ldap://10.101.10.10 -U Administrator --password=ParentRootAdminPass2026! --realm=MEGACORP.LOCAL &&
+        printf 'dn: CN=svc_delegate,CN=Users,DC=megacorp,DC=local\nchangetype: modify\nreplace: userAccountControl\nuserAccountControl: 524800\n' > /tmp/delegate.ldif &&
+        ldbmodify -H ldap://10.101.10.10 -U Administrator --password=ParentRootAdminPass2026! /tmp/delegate.ldif &&
+
+        echo '=== 5. Injecting GPP Password Leak to SYSVOL on Parent DC ===' &&
+        POLICY_DIR=$$(find /parent_samba/sysvol/megacorp.local/Policies/ -maxdepth 1 -name '*{*}*') &&
+        if [ -n \"$$POLICY_DIR\" ]; then
+          mkdir -p \"$$POLICY_DIR/Machine/Preferences/Groups\" &&
+          printf '<?xml version=\"1.0\" encoding=\"utf-8\"?>\n<Groups clsid=\"{3137632E-FA86-4d0f-A02F-A5C94B3C53F7}\">\n  <User clsid=\"{574cc713-398b-4c1e-9119-77a3d3170E38}\" name=\"local_admin\" image=\"2\" changed=\"2026-06-14 10:00:00\" uid=\"{D1240182-1D47-49f5-A4F7-94DF8E96541D}\">\n    <Properties action=\"U\" newName=\"local_admin\" fullName=\"\" description=\"\" cpassword=\"j1UyjF5pi7W8Y6fL5xV49V2nU48V392473489\" changeLogon=\"0\" noChangeLogon=\"1\" neverExpires=\"1\" disabled=\"0\" userName=\"local_admin\"/>\n  </User>\n</Groups>\n' > \"$$POLICY_DIR/Machine/Preferences/Groups/Groups.xml\" &&
+          echo 'SYSVOL GPP injected.'
+        fi &&
+
+        echo '=== 6. Creating Practice Users on Child Domain ===' &&
+        users='j.doe a.smith b.gates l.torvalds s.jobs' &&
+        i=1 &&
+        for username in $$users; do
+          password=\"CorpSecurePass2026!$$i\" &&
+          samba-tool user create $$username $$password -H ldap://10.101.20.10 -U Administrator --password=ChildSubAdminPass2026! --realm=HQ.MEGACORP.LOCAL &&
+          i=$$(($$i+1))
+        done &&
+        echo 'AD Multi-Domain Lab Provisioning Completed!' &&
+        sleep infinity"
+
+networks:
+  parent-net: { ipam: { config: [{ subnet: 10.101.10.0/24 }] } }
+  child-net:  { ipam: { config: [{ subnet: 10.101.20.0/24 }] } }
+  tree-net:   { ipam: { config: [{ subnet: 10.101.30.0/24 }] } }
+  mgmt-net:   { ipam: { config: [{ subnet: 10.101.40.0/24 }] } }
+
+volumes:
+  samba-parent:
+  samba-child:
+  samba-tree:

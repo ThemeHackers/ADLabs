@@ -1,0 +1,179 @@
+services:
+  oscp-wg-gateway:
+    image: lscr.io/linuxserver/wireguard:latest
+    container_name: oscp-wg-gateway
+    cap_add:
+      - NET_ADMIN
+    environment:
+      - PUID=1000
+      - PGID=1000
+      - TZ=Asia/Bangkok
+      - SERVERURL=127.0.0.1
+      - SERVERPORT=51820
+      - PEERS=1
+      - PEERDNS=10.100.10.10
+      - INTERNAL_SUBNET=10.252.1.0/24
+      - ALLOWEDIPS=10.10.10.0/24,10.20.20.0/24,10.100.10.0/24
+    volumes:
+      - ./wireguard_oscp:/config
+    ports:
+      - 51820:51820/udp
+    networks:
+      dmz-net:       { ipv4_address: 10.10.10.150 }
+      server-net:    { ipv4_address: 10.20.20.150 }
+      ad-forest-net: { ipv4_address: 10.100.10.150 }
+    restart: unless-stopped
+
+
+  oscp-exam-router:
+    image: debian:bullseye-slim
+    container_name: oscp-exam-router
+    privileged: true
+    cap_add:
+      - NET_ADMIN
+    restart: always 
+    command: >
+      bash -c "apt-get update && apt-get install -y iptables iproute2 net-tools procps &&
+               sysctl -w net.ipv4.ip_forward=1 &&
+               iptables -A FORWARD -i eth0 -d 10.20.20.0/24 -j DROP &&
+               iptables -A FORWARD -i eth0 -d 10.100.10.0/24 -j DROP &&
+               iptables -A FORWARD -s 10.10.10.0/24 -d 10.100.10.0/24 -j DROP &&
+               iptables -A FORWARD -s 10.10.10.0/24 -d 10.20.20.20 -p tcp --dport 5432 -j ACCEPT &&
+               iptables -A FORWARD -s 10.10.10.0/24 -d 10.20.20.30 -p tcp --dport 6379 -j ACCEPT &&
+               iptables -t nat -A POSTROUTING -j MASQUERADE &&
+               sleep infinity"
+    networks:
+      dmz-net:        { ipv4_address: 10.10.10.254 }
+      server-net:     { ipv4_address: 10.20.20.254 }
+      ad-forest-net:  { ipv4_address: 10.100.10.254 }
+
+  perimeter-nginx-ui:
+    image: uozi/nginx-ui:latest
+    container_name: perimeter-nginx-ui
+    environment:
+      - NGINX_UI_MAINTAINER=admin
+    networks:
+      dmz-net: { ipv4_address: 10.10.10.80 }
+    restart: unless-stopped
+
+  internal-postgres-db:
+    image: vulhub/postgres:10.7
+    container_name: internal-postgres-db
+    environment:
+      - POSTGRES_USER=postgres
+      - POSTGRES_PASSWORD=DB_Prod_Admin_SuperSecure_Pass2026!
+    networks:
+      server-net: { ipv4_address: 10.20.20.20 }
+    command: >
+      bash -c "echo 'OSCP{internal_database_access_clear}' > /var/db_flag.txt &&
+               docker-entrypoint.sh postgres"
+    restart: unless-stopped
+
+  internal-cache-redis:
+    image: vulhub/redis:5.0.7
+    container_name: internal-cache-redis
+    networks:
+      server-net: { ipv4_address: 10.20.20.30 }
+    restart: unless-stopped
+
+  ad-forest-child:
+    image: linuxcrafts/samba-ad-dc:latest
+    container_name: ad-forest-child
+    privileged: true
+    environment:
+      - DOMAIN=HQ
+      - REALM=HQ.MEGACORP.LOCAL
+      - ADMIN_PASSWORD=ChildSubAdminPass2026!
+    volumes:
+      - samba-child-rw:/var/lib/samba
+    networks:
+      ad-forest-net: { ipv4_address: 10.100.10.20 }
+    dns: 127.0.0.1
+    restart: unless-stopped
+
+  ad-forest-parent:
+    image: linuxcrafts/samba-ad-dc:latest
+    container_name: ad-forest-parent
+    privileged: true
+    environment:
+      - DOMAIN=MEGACORP
+      - REALM=MEGACORP.LOCAL
+      - ADMIN_PASSWORD=ParentRootAdminPass2026!
+    volumes:
+      - samba-parent-rw:/var/lib/samba
+    networks:
+      ad-forest-net: { ipv4_address: 10.100.10.10 }
+    dns: 127.0.0.1
+    restart: unless-stopped
+
+  ad-user-automator:
+    image: linuxcrafts/samba-ad-dc:latest
+    entrypoint: ["/bin/sh", "-c"]
+    container_name: ad-user-automator
+    depends_on:
+      - ad-forest-child
+    networks:
+      ad-forest-net: { ipv4_address: 10.100.10.100 }
+    volumes:
+      - ./oscp_exam_assets:/output
+      - samba-parent-rw:/parent_samba
+      - samba-child-rw:/child_samba
+    command: >
+      "sleep 55 &&
+        echo '=== 1. Disabling Password Policy Complexity ===' &&
+        samba-tool domain passwordsettings set --complexity=off -H ldap://10.100.10.10 -U Administrator --password=ParentRootAdminPass2026! &&
+        samba-tool domain passwordsettings set --min-pwd-length=4 -H ldap://10.100.10.10 -U Administrator --password=ParentRootAdminPass2026! &&
+        samba-tool domain passwordsettings set --history-length=0 -H ldap://10.100.10.10 -U Administrator --password=ParentRootAdminPass2026! &&
+        samba-tool domain passwordsettings set --complexity=off -H ldap://10.100.10.20 -U Administrator --password=ChildSubAdminPass2026! &&
+        samba-tool domain passwordsettings set --min-pwd-length=4 -H ldap://10.100.10.20 -U Administrator --password=ChildSubAdminPass2026! &&
+        samba-tool domain passwordsettings set --history-length=0 -H ldap://10.100.10.20 -U Administrator --password=ChildSubAdminPass2026! &&
+
+        echo '=== 2. Creating AS-REP Roasting Target User ===' &&
+        samba-tool user create svc_backups BackupPassword123! -H ldap://10.100.10.10 -U Administrator --password=ParentRootAdminPass2026! --realm=MEGACORP.LOCAL &&
+        printf 'dn: CN=svc_backups,CN=Users,DC=megacorp,DC=local\nchangetype: modify\nreplace: userAccountControl\nuserAccountControl: 4194816\n' > /tmp/asrep.ldif &&
+        ldbmodify -H ldap://10.100.10.10 -U Administrator --password=ParentRootAdminPass2026! /tmp/asrep.ldif &&
+
+        echo '=== 3. Creating Kerberoasting Target User ===' &&
+        samba-tool user create sql_service SQLServicePass123! -H ldap://10.100.10.20 -U Administrator --password=ChildSubAdminPass2026! --realm=HQ.MEGACORP.LOCAL &&
+        samba-tool spn add MSSQLSvc/sql-db.hq.megacorp.local:1433 sql_service -H ldap://10.100.10.20 -U Administrator --password=ChildSubAdminPass2026! &&
+
+        echo '=== 4. Creating Delegation Target User ===' &&
+        samba-tool user create svc_delegate DelegatePass123! -H ldap://10.100.10.10 -U Administrator --password=ParentRootAdminPass2026! --realm=MEGACORP.LOCAL &&
+        printf 'dn: CN=svc_delegate,CN=Users,DC=megacorp,DC=local\nchangetype: modify\nreplace: userAccountControl\nuserAccountControl: 524800\n' > /tmp/delegate.ldif &&
+        ldbmodify -H ldap://10.100.10.10 -U Administrator --password=ParentRootAdminPass2026! /tmp/delegate.ldif &&
+
+        echo '=== 5. Injecting GPP Password Leak to SYSVOL ===' &&
+        POLICY_DIR=$$(find /parent_samba/sysvol/megacorp.local/Policies/ -maxdepth 1 -name '*{*}*') &&
+        if [ -n \"$$POLICY_DIR\" ]; then
+          mkdir -p \"$$POLICY_DIR/Machine/Preferences/Groups\" &&
+          printf '<?xml version=\"1.0\" encoding=\"utf-8\"?>\n<Groups clsid=\"{3137632E-FA86-4d0f-A02F-A5C94B3C53F7}\">\n  <User clsid=\"{574cc713-398b-4c1e-9119-77a3d3170E38}\" name=\"local_admin\" image=\"2\" changed=\"2026-06-14 10:00:00\" uid=\"{D1240182-1D47-49f5-A4F7-94DF8E96541D}\">\n    <Properties action=\"U\" newName=\"local_admin\" fullName=\"\" description=\"\" cpassword=\"j1UyjF5pi7W8Y6fL5xV49V2nU48V392473489\" changeLogon=\"0\" noChangeLogon=\"1\" neverExpires=\"1\" disabled=\"0\" userName=\"local_admin\"/>\n  </User>\n</Groups>\n' > \"$$POLICY_DIR/Machine/Preferences/Groups/Groups.xml\" &&
+          echo 'SYSVOL GPP injected.'
+        fi &&
+
+        echo '=== 6. Creating Practice Users on Child Domain ===' &&
+        users='j.smith r.jones m.brown t.taylor d.miller j.wilson b.moore s.taylor a.anderson k.thomas c.jackson m.white l.harris e.martin r.clark s.lewis g.robinson j.walker k.young p.allen' &&
+        mkdir -p /output &&
+        echo '=== Active Directory Generated Accounts ===' > /output/credentials.txt &&
+        > /output/usernames.txt &&
+        > /output/passwords.txt &&
+        i=1 &&
+        for username in $$users; do
+          password=\"CorpSecurePass2026!$$i\" &&
+          samba-tool user create $$username $$password -H ldap://10.100.10.20 -U Administrator --password=ChildSubAdminPass2026! --realm=HQ.MEGACORP.LOCAL &&
+          echo \"$$username:$$password\" >> /output/credentials.txt &&
+          echo \"$$username\" >> /output/usernames.txt &&
+          echo \"$$password\" >> /output/passwords.txt &&
+          i=$$((i+1))
+        done &&
+        echo 'AD Lab Provisioning Completed!' &&
+        sleep infinity"
+
+
+networks:
+  dmz-net:       { ipam: { config: [{ subnet: 10.10.10.0/24 }] } }
+  server-net:    { ipam: { config: [{ subnet: 10.20.20.0/24 }] } }
+  ad-forest-net: { ipam: { config: [{ subnet: 10.100.10.0/24 }] } }
+
+volumes:
+  samba-parent-rw:
+  samba-child-rw:

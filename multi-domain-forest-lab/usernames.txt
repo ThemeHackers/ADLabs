@@ -1,0 +1,5 @@
+j.doe
+a.smith
+b.gates
+l.torvalds
+s.jobs

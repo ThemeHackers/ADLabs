@@ -1,0 +1,82 @@
+services:
+  esc8-wg-gateway:
+    image: lscr.io/linuxserver/wireguard:latest
+    container_name: esc8-wg-gateway
+    cap_add:
+      - NET_ADMIN
+    environment:
+      - PUID=1000
+      - PGID=1000
+      - TZ=Asia/Bangkok
+      - SERVERURL=127.0.0.1
+      - SERVERPORT=51828
+      - PEERS=1
+      - PEERDNS=10.108.10.10
+      - INTERNAL_SUBNET=10.252.9.0/24
+      - ALLOWEDIPS=10.108.10.0/24,10.108.20.0/24
+    volumes:
+      - ./wireguard_esc8:/config
+    ports:
+      - 51828:51820/udp
+    networks:
+      ad-net: { ipv4_address: 10.108.10.150 }
+      web-net: { ipv4_address: 10.108.20.150 }
+    restart: unless-stopped
+
+  esc8-core-router:
+    image: debian:bullseye-slim
+    container_name: esc8-core-router
+    privileged: true
+    cap_add:
+      - NET_ADMIN
+    command: >
+      sh -c "apt-get update && apt-get install -y iptables iproute2 net-tools procps &&
+             sysctl -w net.ipv4.ip_forward=1 &&
+             iptables -t nat -A POSTROUTING -j MASQUERADE &&
+             sleep infinity"
+    networks:
+      ad-net: { ipv4_address: 10.108.10.254 }
+      web-net: { ipv4_address: 10.108.20.254 }
+    restart: always
+
+  esc8-dc:
+    image: linuxcrafts/samba-ad-dc:latest
+    container_name: esc8-dc
+    privileged: true
+    cap_add:
+      - NET_ADMIN
+    environment:
+      - DOMAIN=ESC8LAB
+      - REALM=ESC8LAB.LOCAL
+      - ADMIN_PASSWORD=ESC8AdminPass2026!
+    volumes:
+      - esc8-dc-data:/var/lib/samba
+      - ./trigger.py:/tmp/trigger.py
+    entrypoint: ["/bin/sh", "-c", "ip route add 10.108.20.0/24 via 10.108.10.254 || true; python3 /tmp/trigger.py & exec /samba-ad-dc"]
+    networks:
+      ad-net: { ipv4_address: 10.108.10.10 }
+    dns: 127.0.0.1
+    restart: unless-stopped
+
+  esc8-ca-web:
+    image: python:3.11-slim
+    container_name: esc8-ca-web
+    privileged: true
+    cap_add:
+      - NET_ADMIN
+    volumes:
+      - ./ca_server.py:/tmp/ca_server.py
+    command: >
+      sh -c "apt-get update && apt-get install -y iproute2 procps &&
+             ip route add 10.108.10.0/24 via 10.108.20.254 || true;
+             python3 /tmp/ca_server.py"
+    networks:
+      web-net: { ipv4_address: 10.108.20.20 }
+    restart: unless-stopped
+
+networks:
+  ad-net: { ipam: { config: [{ subnet: 10.108.10.0/24 }] } }
+  web-net: { ipam: { config: [{ subnet: 10.108.20.0/24 }] } }
+
+volumes:
+  esc8-dc-data:

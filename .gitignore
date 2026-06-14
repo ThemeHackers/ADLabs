@@ -1,0 +1,37 @@
+# WireGuard State Directories (contains dynamic private keys, certificates, and runtime state)
+**/wireguard_adcs/
+**/wireguard_deleg/
+**/wireguard_esc8/
+**/wireguard_forest/
+**/wireguard_gpo/
+**/wireguard_laps/
+**/wireguard_oscp/
+**/wireguard_rbcd/
+**/wireguard_sql/
+**/wireguard_trust/
+
+# Python Cache & Bytecode
+__pycache__/
+*.py[cod]
+*$py.class
+.pytest_cache/
+
+# OS-generated files
+.DS_Store
+.DS_Store?
+._*
+.Spotlight-V100
+.Trashes
+ehthumbs.db
+Thumbs.db
+desktop.ini
+
+# IDE & Editor configurations
+.vscode/
+.idea/
+.agents/
+*.swp
+*.swo
+
+# Docker / Local logs
+*.log
