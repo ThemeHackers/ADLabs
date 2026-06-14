@@ -73,15 +73,25 @@ def main():
     parser.add_argument('--role', required=True, choices=['parent', 'child', 'tree'])
     parser.add_argument('--realm', required=True)
     parser.add_argument('--practice-users', help='Space-separated list of practice users to create')
+    parser.add_argument('--user-prefix', default='')
     args = parser.parse_args()
 
-    print(f"Starting AD configuration script. Role={args.role}, Realm={args.realm}", flush=True)
+    print(f"Starting AD configuration script. Role={args.role}, Realm={args.realm}, Prefix={args.user_prefix}", flush=True)
 
     lp = samba.param.LoadParm()
     lp.load('/samba/etc/smb.conf')
     samdb = SamDB(url='/samba/private/sam.ldb', lp=lp, session_info=system_session())
     domain_dn = samdb.domain_dn()
     print(f"Connected to SamDB for domain DN: {domain_dn}", flush=True)
+
+    prefix = args.user_prefix if args.user_prefix else ""
+    u_backups = f"{prefix}svc_backups"
+    u_delegate = f"{prefix}svc_delegate"
+    u_doe = f"{prefix}j.doe"
+    u_mssql = f"{prefix}svc_mssql"
+    u_sql_service = f"{prefix}sql_service"
+    u_api = f"{prefix}svc_api"
+    u_tree = f"{prefix}svc_tree"
 
     print("=== 1. Setting Weak Password Policy ===", flush=True)
     run_samba_tool(["domain", "passwordsettings", "set", "--complexity=off"])
@@ -92,15 +102,15 @@ def main():
 
     if args.role == 'parent':
 
-        print("=== 2. Creating AS-REP Roasting User (svc_backups) ===", flush=True)
-        create_user_if_not_exists(samdb, "svc_backups", "BackupPassword123!", args.realm)
-        samdb.toggle_userAccountFlags("sAMAccountName=svc_backups", dsdb.UF_DONT_REQUIRE_PREAUTH, "dont-require-preauth", on=True, strict=False)
-        samdb.toggle_userAccountFlags("sAMAccountName=svc_backups", dsdb.UF_DONT_EXPIRE_PASSWD, "dont-expire-passwd", on=True, strict=False)
+        print(f"=== 2. Creating AS-REP Roasting User ({u_backups}) ===", flush=True)
+        create_user_if_not_exists(samdb, u_backups, "BackupPassword123!", args.realm)
+        samdb.toggle_userAccountFlags(f"sAMAccountName={u_backups}", dsdb.UF_DONT_REQUIRE_PREAUTH, "dont-require-preauth", on=True, strict=False)
+        samdb.toggle_userAccountFlags(f"sAMAccountName={u_backups}", dsdb.UF_DONT_EXPIRE_PASSWD, "dont-expire-passwd", on=True, strict=False)
 
-        print("=== 3. Creating Unconstrained Delegation User (svc_delegate) ===", flush=True)
-        create_user_if_not_exists(samdb, "svc_delegate", "DelegatePass123!", args.realm)
-        samdb.toggle_userAccountFlags("sAMAccountName=svc_delegate", dsdb.UF_TRUSTED_FOR_DELEGATION, "trusted-for-delegation", on=True, strict=False)
-        samdb.toggle_userAccountFlags("sAMAccountName=svc_delegate", dsdb.UF_DONT_EXPIRE_PASSWD, "dont-expire-passwd", on=True, strict=False)
+        print(f"=== 3. Creating Unconstrained Delegation User ({u_delegate}) ===", flush=True)
+        create_user_if_not_exists(samdb, u_delegate, "DelegatePass123!", args.realm)
+        samdb.toggle_userAccountFlags(f"sAMAccountName={u_delegate}", dsdb.UF_TRUSTED_FOR_DELEGATION, "trusted-for-delegation", on=True, strict=False)
+        samdb.toggle_userAccountFlags(f"sAMAccountName={u_delegate}", dsdb.UF_DONT_EXPIRE_PASSWD, "dont-expire-passwd", on=True, strict=False)
 
         print("=== 4. Injecting GPP Password Leak to SYSVOL ===", flush=True)
         policies_path = f"/samba/state/sysvol/{args.realm.lower()}/Policies"
@@ -110,9 +120,9 @@ def main():
             pref_dir = os.path.join(target_dir, "Machine", "Preferences", "Groups")
             os.makedirs(pref_dir, exist_ok=True)
             groups_xml_path = os.path.join(pref_dir, "Groups.xml")
-            xml_content = """<?xml version="1.0" encoding="utf-8"?>
-<Groups clsid="{3137632E-FA86-4d0f-A02F-A5C94B3C53F7}">
-  <User clsid="{574cc713-398b-4c1e-9119-77a3d3170E38}" name="local_admin" image="2" changed="2026-06-14 10:00:00" uid="{D1240182-1D47-49f5-A4F7-94DF8E96541D}">
+            xml_content = f"""<?xml version="1.0" encoding="utf-8"?>
+<Groups clsid="{{3137632E-FA86-4d0f-A02F-A5C94B3C53F7}}">
+  <User clsid="{{574cc713-398b-4c1e-9119-77a3d3170E38}}" name="local_admin" image="2" changed="2026-06-14 10:00:00" uid="{{D1240182-1D47-49f5-A4F7-94DF8E96541D}}">
     <Properties action="U" newName="local_admin" fullName="" description="" cpassword="j1UyjF5pi7W8Y6fL5xV49V2nU48V392473489" changeLogon="0" noChangeLogon="1" neverExpires="1" disabled="0" userName="local_admin"/>
   </User>
 </Groups>"""
@@ -122,17 +132,17 @@ def main():
 
         print("=== 5. Configuring ACL Abuse Chain ===", flush=True)
 
-        create_user_if_not_exists(samdb, "j.doe", "SimplePass2026!", args.realm)
+        create_user_if_not_exists(samdb, u_doe, "SimplePass2026!", args.realm)
 
-        jdoe_sid, _ = get_object_sid(samdb, "sAMAccountName=j.doe")
-        _, svcb_dn  = get_object_sid(samdb, "sAMAccountName=svc_backups")
+        jdoe_sid, _ = get_object_sid(samdb, f"sAMAccountName={u_doe}")
+        _, svcb_dn  = get_object_sid(samdb, f"sAMAccountName={u_backups}")
 
         if jdoe_sid and svcb_dn:
             grant_ace_on_object(samdb, svcb_dn, jdoe_sid, security.SEC_GENERIC_ALL)
-            print("ACL: j.doe has GenericAll over svc_backups (Password Reset / Targeted Kerberoast)", flush=True)
+            print(f"ACL: {u_doe} has GenericAll over {u_backups} (Password Reset / Targeted Kerberoast)", flush=True)
 
         run_samba_tool(["group", "add", "HelpDesk"])
-        run_samba_tool(["group", "addmembers", "HelpDesk", "j.doe"])
+        run_samba_tool(["group", "addmembers", "HelpDesk", u_doe])
 
         helpdesk_sid, _ = get_object_sid(samdb, "sAMAccountName=HelpDesk")
         _, da_dn = get_object_sid(samdb, "sAMAccountName=Domain Admins")
@@ -141,7 +151,7 @@ def main():
             print("ACL: HelpDesk has GenericWrite over Domain Admins (Self-Add Member)", flush=True)
 
         run_samba_tool(["group", "add", "IT-Support"])
-        run_samba_tool(["group", "addmembers", "IT-Support", "j.doe"])
+        run_samba_tool(["group", "addmembers", "IT-Support", u_doe])
 
         itsupport_sid, _ = get_object_sid(samdb, "sAMAccountName=IT-Support")
         if itsupport_sid:
@@ -149,12 +159,12 @@ def main():
             grant_ace_on_object(samdb, domain_dn_obj, itsupport_sid, security.SEC_STD_WRITE_DAC)
             print("ACL: IT-Support has WriteDACL on Domain -> DCSync path via DACL rewrite", flush=True)
 
-        print("=== 6. Creating Silver Ticket Target (svc_mssql with SPN) ===", flush=True)
-        create_user_if_not_exists(samdb, "svc_mssql", "MSSQLService2026!", args.realm)
-        run_samba_tool(["spn", "add", f"MSSQLSvc/db-server.{args.realm.lower()}:1433", "svc_mssql"])
-        run_samba_tool(["spn", "add", f"MSSQLSvc/db-server.{args.realm.lower()}", "svc_mssql"])
-        samdb.toggle_userAccountFlags("sAMAccountName=svc_mssql", dsdb.UF_DONT_EXPIRE_PASSWD, "dont-expire-passwd", on=True, strict=False)
-        print("svc_mssql created with SPN - Kerberoastable -> Silver Ticket after hash crack", flush=True)
+        print(f"=== 6. Creating Silver Ticket Target ({u_mssql} with SPN) ===", flush=True)
+        create_user_if_not_exists(samdb, u_mssql, "MSSQLService2026!", args.realm)
+        run_samba_tool(["spn", "add", f"MSSQLSvc/db-server.{args.realm.lower()}:1433", u_mssql])
+        run_samba_tool(["spn", "add", f"MSSQLSvc/db-server.{args.realm.lower()}", u_mssql])
+        samdb.toggle_userAccountFlags(f"sAMAccountName={u_mssql}", dsdb.UF_DONT_EXPIRE_PASSWD, "dont-expire-passwd", on=True, strict=False)
+        print(f"{u_mssql} created with SPN - Kerberoastable -> Silver Ticket after hash crack", flush=True)
 
         print("=== 7. Configuring Anonymous SMB Share ===", flush=True)
         share_dir = f"/var/lib/samba/shares/public"
@@ -163,7 +173,7 @@ def main():
             f.write("db_host=10.20.20.20\n")
             f.write("db_user=postgres\n")
             f.write("db_pass=DB_Prod_Admin_SuperSecure_Pass2026!\n")
-            f.write("ad_bind_user=j.doe\n")
+            f.write(f"ad_bind_user={u_doe}\n")
             f.write("ad_bind_pass=SimplePass2026!\n")
         try:
             smb_conf = "/samba/etc/smb.conf"
@@ -213,18 +223,18 @@ def main():
 
     elif args.role == 'child':
 
-        print("=== 2. Creating Kerberoasting User (sql_service) ===", flush=True)
-        create_user_if_not_exists(samdb, "sql_service", "SQLServicePass123!", args.realm)
+        print(f"=== 2. Creating Kerberoasting User ({u_sql_service}) ===", flush=True)
+        create_user_if_not_exists(samdb, u_sql_service, "SQLServicePass123!", args.realm)
         spn_str = f"MSSQLSvc/sql-db.{args.realm.lower()}:1433"
-        run_samba_tool(["spn", "add", spn_str, "sql_service"])
+        run_samba_tool(["spn", "add", spn_str, u_sql_service])
 
-        print("=== 3. Creating Shadow Credentials Target (svc_api) ===", flush=True)
-        create_user_if_not_exists(samdb, "svc_api", "APIServicePass2026!", args.realm)
-        sql_sid, _ = get_object_sid(samdb, "sAMAccountName=sql_service")
-        _, svcapi_dn = get_object_sid(samdb, "sAMAccountName=svc_api")
+        print(f"=== 3. Creating Shadow Credentials Target ({u_api}) ===", flush=True)
+        create_user_if_not_exists(samdb, u_api, "APIServicePass2026!", args.realm)
+        sql_sid, _ = get_object_sid(samdb, f"sAMAccountName={u_sql_service}")
+        _, svcapi_dn = get_object_sid(samdb, f"sAMAccountName={u_api}")
         if sql_sid and svcapi_dn:
             grant_ace_on_object(samdb, svcapi_dn, sql_sid, security.SEC_GENERIC_WRITE)
-            print("ACL: sql_service has GenericWrite over svc_api -> msDS-KeyCredentialLink abuse", flush=True)
+            print(f"ACL: {u_sql_service} has GenericWrite over {u_api} -> msDS-KeyCredentialLink abuse", flush=True)
 
         if args.practice_users:
             print("=== 4. Creating Practice Users ===", flush=True)
@@ -239,9 +249,9 @@ def main():
 
     elif args.role == 'tree':
 
-        print("=== 2. Creating Kerberoasting Target in Tree Domain ===", flush=True)
-        create_user_if_not_exists(samdb, "svc_tree", "TreeServicePass123!", args.realm)
-        run_samba_tool(["spn", "add", f"HTTP/web.{args.realm.lower()}:80", "svc_tree"])
+        print(f"=== 2. Creating Kerberoasting Target in Tree Domain ({u_tree}) ===", flush=True)
+        create_user_if_not_exists(samdb, u_tree, "TreeServicePass123!", args.realm)
+        run_samba_tool(["spn", "add", f"HTTP/web.{args.realm.lower()}:80", u_tree])
 
     print("Configuration finished successfully!", flush=True)
 

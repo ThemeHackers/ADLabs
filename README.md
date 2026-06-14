@@ -78,6 +78,26 @@ To prevent port conflicts on the host, each lab operates on isolated subnet spac
 > [!WARNING]
 > Only activate **one lab tunnel at a time** in your WireGuard Client to prevent routing and DNS resolution conflicts on your host.
 
+### Connecting directly inside WSL2 (Ubuntu)
+If you prefer to connect to the WireGuard VPN directly inside your WSL2 Ubuntu terminal, follow these steps:
+
+1. Install WireGuard and resolvconf:
+   ```bash
+   sudo apt update && sudo apt install -y wireguard resolvconf
+   ```
+2. Copy the desired lab configuration file (e.g., for Lab 8):
+   ```bash
+   sudo cp /mnt/c/Users/1com310568/Downloads/ADLabs/laps-lab/oscp-laps-lab.conf /etc/wireguard/wg0.conf
+   ```
+3. Start the VPN connection:
+   ```bash
+   sudo wg-quick up wg0
+   ```
+4. Stop the VPN connection when finished:
+   ```bash
+   sudo wg-quick down wg0
+   ```
+
 ---
 
 ## 4. How to Manage & Provision Labs

@@ -65,10 +65,10 @@ run_tool(["domain", "passwordsettings", "set", "--min-pwd-length=4"])
 run_tool(["domain", "passwordsettings", "set", "--history-length=0"])
 run_tool(["domain", "passwordsettings", "set", "--account-lockout-threshold=0"])
 
-run_tool(["user", "create", "audit_user", "AuditPass2026!", "--realm=LAPSLAB.LOCAL"])
-run_tool(["user", "create", "it_helpdesk", "HelpdeskPass2026!", "--realm=LAPSLAB.LOCAL"])
-run_tool(["user", "create", "svc_monitor", "MonitorSvcPass123!", "--realm=LAPSLAB.LOCAL"])
-run_tool(["spn", "add", "HTTP/monitor.lapslab.local:8080", "svc_monitor"])
+run_tool(["user", "create", "l8_audit_user", "AuditPass2026!", "--realm=LAPSLAB.LOCAL"])
+run_tool(["user", "create", "l8_it_helpdesk", "HelpdeskPass2026!", "--realm=LAPSLAB.LOCAL"])
+run_tool(["user", "create", "l8_svc_monitor", "MonitorSvcPass123!", "--realm=LAPSLAB.LOCAL"])
+run_tool(["spn", "add", "HTTP/monitor.lapslab.local:8080", "l8_svc_monitor"])
 
 run_tool(["computer", "create", "srv-finance"])
 run_tool(["computer", "create", "ws-admin"])
@@ -100,22 +100,22 @@ if res_fin:
     samdb.modify(msg)
     print("[+] LAPS password injected in 'info' attribute on srv-finance$")
 
-audit_sid, _ = get_sid("sAMAccountName=audit_user")
+audit_sid, _ = get_sid("sAMAccountName=l8_audit_user")
 _, fin_dn = get_sid("sAMAccountName=srv-finance$")
 if audit_sid and fin_dn:
     grant_ace(fin_dn, audit_sid, security.SEC_ADS_READ_PROP | security.SEC_ADS_LIST)
-    print("[+] audit_user has ReadProperty on srv-finance$")
+    print("[+] l8_audit_user has ReadProperty on srv-finance$")
 
-hd_sid, _ = get_sid("sAMAccountName=it_helpdesk")
+hd_sid, _ = get_sid("sAMAccountName=l8_it_helpdesk")
 _, bk_dn = get_sid("sAMAccountName=srv-backup$")
 if hd_sid and bk_dn:
     grant_ace(bk_dn, hd_sid, security.SEC_GENERIC_ALL)
-    print("[+] it_helpdesk has GenericAll on srv-backup$ -> RBCD path")
+    print("[+] l8_it_helpdesk has GenericAll on srv-backup$ -> RBCD path")
 
-samdb.toggle_userAccountFlags("sAMAccountName=audit_user", dsdb.UF_DONT_REQUIRE_PREAUTH,
+samdb.toggle_userAccountFlags("sAMAccountName=l8_audit_user", dsdb.UF_DONT_REQUIRE_PREAUTH,
                                "dont-require-preauth", on=True, strict=False)
-samdb.toggle_userAccountFlags("sAMAccountName=audit_user", dsdb.UF_DONT_EXPIRE_PASSWD,
+samdb.toggle_userAccountFlags("sAMAccountName=l8_audit_user", dsdb.UF_DONT_EXPIRE_PASSWD,
                                "dont-expire-passwd", on=True, strict=False)
-print("[+] audit_user is AS-REP Roastable")
+print("[+] l8_audit_user is AS-REP Roastable")
 
 print("[+] LAPS Lab configuration complete!")

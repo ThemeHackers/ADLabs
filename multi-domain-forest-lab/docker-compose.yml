@@ -121,17 +121,17 @@ services:
         samba-tool domain passwordsettings set --min-pwd-length=4 -H ldap://10.101.30.10 -U Administrator --password=TreeAcquisitionPass2026! &&
 
         echo '=== 2. Creating AS-REP Roasting vulnerable accounts on Parent DC ===' &&
-        samba-tool user create svc_backups BackupPassword123! -H ldap://10.101.10.10 -U Administrator --password=ParentRootAdminPass2026! --realm=MEGACORP.LOCAL &&
-        printf 'dn: CN=svc_backups,CN=Users,DC=megacorp,DC=local\nchangetype: modify\nreplace: userAccountControl\nuserAccountControl: 4194816\n' > /tmp/asrep.ldif &&
+        samba-tool user create l2_svc_backups BackupPassword123! -H ldap://10.101.10.10 -U Administrator --password=ParentRootAdminPass2026! --realm=MEGACORP.LOCAL &&
+        printf 'dn: CN=l2_svc_backups,CN=Users,DC=megacorp,DC=local\nchangetype: modify\nreplace: userAccountControl\nuserAccountControl: 4194816\n' > /tmp/asrep.ldif &&
         ldbmodify -H ldap://10.101.10.10 -U Administrator --password=ParentRootAdminPass2026! /tmp/asrep.ldif &&
 
         echo '=== 3. Creating Kerberoasting Target User on Child DC ===' &&
-        samba-tool user create sql_service SQLServicePass123! -H ldap://10.101.20.10 -U Administrator --password=ChildSubAdminPass2026! --realm=HQ.MEGACORP.LOCAL &&
-        samba-tool spn add MSSQLSvc/sql-db.hq.megacorp.local:1433 sql_service -H ldap://10.101.20.10 -U Administrator --password=ChildSubAdminPass2026! &&
+        samba-tool user create l2_sql_service SQLServicePass123! -H ldap://10.101.20.10 -U Administrator --password=ChildSubAdminPass2026! --realm=HQ.MEGACORP.LOCAL &&
+        samba-tool spn add MSSQLSvc/sql-db.hq.megacorp.local:1433 l2_sql_service -H ldap://10.101.20.10 -U Administrator --password=ChildSubAdminPass2026! &&
 
         echo '=== 4. Creating Delegation Target User on Parent DC ===' &&
-        samba-tool user create svc_delegate DelegatePass123! -H ldap://10.101.10.10 -U Administrator --password=ParentRootAdminPass2026! --realm=MEGACORP.LOCAL &&
-        printf 'dn: CN=svc_delegate,CN=Users,DC=megacorp,DC=local\nchangetype: modify\nreplace: userAccountControl\nuserAccountControl: 524800\n' > /tmp/delegate.ldif &&
+        samba-tool user create l2_svc_delegate DelegatePass123! -H ldap://10.101.10.10 -U Administrator --password=ParentRootAdminPass2026! --realm=MEGACORP.LOCAL &&
+        printf 'dn: CN=l2_svc_delegate,CN=Users,DC=megacorp,DC=local\nchangetype: modify\nreplace: userAccountControl\nuserAccountControl: 524800\n' > /tmp/delegate.ldif &&
         ldbmodify -H ldap://10.101.10.10 -U Administrator --password=ParentRootAdminPass2026! /tmp/delegate.ldif &&
 
         echo '=== 5. Injecting GPP Password Leak to SYSVOL on Parent DC ===' &&

@@ -65,19 +65,19 @@ run_tool(["domain", "passwordsettings", "set", "--min-pwd-length=4"])
 run_tool(["domain", "passwordsettings", "set", "--history-length=0"])
 run_tool(["domain", "passwordsettings", "set", "--account-lockout-threshold=0"])
 
-run_tool(["user", "create", "web_service", "WebServPass123!", "--realm=DELEGATELAB.LOCAL"])
-run_tool(["user", "create", "db_service", "DBServPass123!", "--realm=DELEGATELAB.LOCAL"])
-run_tool(["user", "create", "j.student", "StudentPass2026!", "--realm=DELEGATELAB.LOCAL"])
-run_tool(["user", "create", "svc_backup_deleg", "BackupDelegPass123!", "--realm=DELEGATELAB.LOCAL"])
+run_tool(["user", "create", "l10_web_service", "WebServPass123!", "--realm=DELEGATELAB.LOCAL"])
+run_tool(["user", "create", "l10_db_service", "DBServPass123!", "--realm=DELEGATELAB.LOCAL"])
+run_tool(["user", "create", "l10_j.student", "StudentPass2026!", "--realm=DELEGATELAB.LOCAL"])
+run_tool(["user", "create", "l10_svc_backup_deleg", "BackupDelegPass123!", "--realm=DELEGATELAB.LOCAL"])
 
 run_tool(["computer", "create", "deleg-db"])
 run_tool(["computer", "create", "deleg-web"])
 
-run_tool(["spn", "add", "HTTP/web-server.delegatelab.local", "web_service"])
-run_tool(["spn", "add", "HTTP/web-server.delegatelab.local:80", "web_service"])
-run_tool(["spn", "add", "MSSQLSvc/deleg-db.delegatelab.local:1433", "db_service"])
+run_tool(["spn", "add", "HTTP/web-server.delegatelab.local", "l10_web_service"])
+run_tool(["spn", "add", "HTTP/web-server.delegatelab.local:80", "l10_web_service"])
+run_tool(["spn", "add", "MSSQLSvc/deleg-db.delegatelab.local:1433", "l10_db_service"])
 
-res = samdb.search(base=domain_dn, scope=SCOPE_SUBTREE, expression="sAMAccountName=web_service")
+res = samdb.search(base=domain_dn, scope=SCOPE_SUBTREE, expression="sAMAccountName=l10_web_service")
 if res:
     user_dn = res[0].dn
     msg = Message()
@@ -91,16 +91,16 @@ if res:
 
 try:
     samdb.toggle_userAccountFlags(
-        "sAMAccountName=web_service",
+        "sAMAccountName=l10_web_service",
         dsdb.UF_TRUSTED_TO_AUTHENTICATE_FOR_DELEGATION,
         "trusted-to-authenticate-for-delegation",
         on=True, strict=False
     )
-    print("[+] web_service has Protocol Transition (S4U2Self) enabled")
+    print("[+] l10_web_service has Protocol Transition (S4U2Self) enabled")
 except Exception as e:
     print(f"[!] Protocol Transition flag error (trying UAC direct): {e}")
     try:
-        res = samdb.search(base=domain_dn, scope=SCOPE_SUBTREE, expression="sAMAccountName=web_service")
+        res = samdb.search(base=domain_dn, scope=SCOPE_SUBTREE, expression="sAMAccountName=l10_web_service")
         if res:
             current_uac = int(res[0].get("userAccountControl", [b"512"])[0])
             new_uac = current_uac | 0x01000000
@@ -112,16 +112,16 @@ except Exception as e:
     except Exception as e2:
         print(f"[!] UAC fallback also failed: {e2}")
 
-samdb.toggle_userAccountFlags("sAMAccountName=svc_backup_deleg", dsdb.UF_DONT_REQUIRE_PREAUTH,
+samdb.toggle_userAccountFlags("sAMAccountName=l10_svc_backup_deleg", dsdb.UF_DONT_REQUIRE_PREAUTH,
                                "dont-require-preauth", on=True, strict=False)
-samdb.toggle_userAccountFlags("sAMAccountName=svc_backup_deleg", dsdb.UF_DONT_EXPIRE_PASSWD,
+samdb.toggle_userAccountFlags("sAMAccountName=l10_svc_backup_deleg", dsdb.UF_DONT_EXPIRE_PASSWD,
                                "dont-expire-passwd", on=True, strict=False)
-print("[+] svc_backup_deleg is AS-REP Roastable")
+print("[+] l10_svc_backup_deleg is AS-REP Roastable")
 
-jstudent_sid, _ = get_sid_and_dn("sAMAccountName=j.student")
-_, dbsvc_dn = get_sid_and_dn("sAMAccountName=db_service")
+jstudent_sid, _ = get_sid_and_dn("sAMAccountName=l10_j.student")
+_, dbsvc_dn = get_sid_and_dn("sAMAccountName=l10_db_service")
 if jstudent_sid and dbsvc_dn:
     grant_ace(dbsvc_dn, jstudent_sid, security.SEC_GENERIC_WRITE)
-    print("[+] j.student has GenericWrite on db_service -> msDS-KeyCredentialLink (Shadow Credentials)")
+    print("[+] l10_j.student has GenericWrite on l10_db_service -> msDS-KeyCredentialLink (Shadow Credentials)")
 
 print("[+] Delegation Lab configuration complete!")

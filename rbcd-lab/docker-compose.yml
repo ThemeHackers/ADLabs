@@ -45,13 +45,40 @@ services:
     privileged: true
     cap_add:
       - NET_ADMIN
-    entrypoint: ["/bin/sh", "-c", "ip route add 10.105.20.0/24 via 10.105.10.254 || true; exec /samba-ad-dc"]
+    entrypoint: 
+      - /bin/sh
+      - -c
+      - |
+        ip route add 10.105.20.0/24 via 10.105.10.254 || true
+        
+
+        rm -rf /var/lib/samba
+        ln -sf /samba /var/lib/samba
+        
+      
+        mkdir -p /etc/samba
+        rm -f /etc/samba/smb.conf
+        ln -sf /samba/etc/smb.conf /etc/samba/smb.conf
+        
+        chmod 700 /samba/private/msg.sock || true
+        rm -f /samba/private/tls/*.pem || true
+        
+        echo "Starting Samba AD DC and applying fixes..."
+        
+        (
+          sleep 15
+          ln -sf /samba/etc/smb.conf /etc/samba/smb.conf
+          samba-tool dbcheck --cross-ncs --fix --yes --configfile=/samba/etc/smb.conf
+          samba-tool ntacl sysvolreset --configfile=/samba/etc/smb.conf
+        ) &
+        
+        exec /samba-ad-dc
     environment:
       - DOMAIN=RBCDLAB
       - REALM=RBCDLAB.LOCAL
       - ADMIN_PASSWORD=RBCDAccessAdminPass2026!
     volumes:
-      - rbcd-dc-data:/var/lib/samba
+      - rbcd-dc-data:/samba
     networks:
       ad-net: { ipv4_address: 10.105.10.10 }
     dns: 127.0.0.1

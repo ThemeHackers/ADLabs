@@ -4,7 +4,7 @@ import sys
 import time
 import argparse
 
-# Colors
+
 BLUE = "\033[94m"
 GREEN = "\033[92m"
 YELLOW = "\033[93m"
@@ -15,7 +15,7 @@ BOLD = "\033[1m"
 RESET = "\033[0m"
 
 if os.name == 'nt':
-    os.system('') # Enable ANSI colors in Windows terminal
+    os.system('') 
 
 def print_info(msg):
     print(f"{CYAN}[*] {msg}{RESET}")
@@ -105,40 +105,40 @@ def provision_lab1(base_dir, script_path):
     run_cmd(["docker", "exec", "perimeter-nginx-ui", "sh", "-c", "echo 'OSCP{foothold_perimeter_breached}' > /var/flag.txt"], check=False)
     run_cmd(["docker", "exec", "perimeter-nginx-ui", "sh", "-c", "echo 'ad_audit_user:AuditServicePass2026!' > /tmp/domain_hint.txt"], check=False)
     run_cmd(["docker", "cp", script_path, "ad-forest-parent:/tmp/configure_ad.py"])
-    run_cmd(["docker", "exec", "ad-forest-parent", "python3", "/tmp/configure_ad.py", "--role", "parent", "--realm", "MEGACORP.LOCAL"])
+    run_cmd(["docker", "exec", "ad-forest-parent", "python3", "/tmp/configure_ad.py", "--role", "parent", "--realm", "MEGACORP.LOCAL", "--user-prefix", "l1_"])
     run_cmd(["docker", "cp", script_path, "ad-forest-child:/tmp/configure_ad.py"])
     practice_users_l1 = "j.smith r.jones m.brown t.taylor d.miller j.wilson b.moore s.taylor a.anderson k.thomas c.jackson m.white l.harris e.martin r.clark s.lewis g.robinson j.walker k.young p.allen"
-    run_cmd(["docker", "exec", "ad-forest-child", "python3", "/tmp/configure_ad.py", "--role", "child", "--realm", "HQ.MEGACORP.LOCAL", "--practice-users", practice_users_l1])
+    run_cmd(["docker", "exec", "ad-forest-child", "python3", "/tmp/configure_ad.py", "--role", "child", "--realm", "HQ.MEGACORP.LOCAL", "--practice-users", practice_users_l1, "--user-prefix", "l1_"])
     process_generated_creds("ad-forest-child", os.path.join(base_dir, "oscp-network-pivot-lab", "oscp_exam_assets"))
 
 def provision_lab2(base_dir, script_path):
     print_header("Provisioning Lab 2 (multi-domain-forest-lab)")
     run_cmd(["docker", "cp", script_path, "mega-dc-parent:/tmp/configure_ad.py"])
-    run_cmd(["docker", "exec", "mega-dc-parent", "python3", "/tmp/configure_ad.py", "--role", "parent", "--realm", "MEGACORP.LOCAL"])
+    run_cmd(["docker", "exec", "mega-dc-parent", "python3", "/tmp/configure_ad.py", "--role", "parent", "--realm", "MEGACORP.LOCAL", "--user-prefix", "l2_"])
     run_cmd(["docker", "cp", script_path, "mega-dc-child:/tmp/configure_ad.py"])
     practice_users_l2 = "j.doe a.smith b.gates l.torvalds s.jobs"
-    run_cmd(["docker", "exec", "mega-dc-child", "python3", "/tmp/configure_ad.py", "--role", "child", "--realm", "HQ.MEGACORP.LOCAL", "--practice-users", practice_users_l2])
+    run_cmd(["docker", "exec", "mega-dc-child", "python3", "/tmp/configure_ad.py", "--role", "child", "--realm", "HQ.MEGACORP.LOCAL", "--practice-users", practice_users_l2, "--user-prefix", "l2_"])
     process_generated_creds("mega-dc-child", os.path.join(base_dir, "multi-domain-forest-lab"))
     run_cmd(["docker", "cp", script_path, "mega-dc-tree:/tmp/configure_ad.py"])
-    run_cmd(["docker", "exec", "mega-dc-tree", "python3", "/tmp/configure_ad.py", "--role", "tree", "--realm", "CYBERTECH.LOCAL"])
+    run_cmd(["docker", "exec", "mega-dc-tree", "python3", "/tmp/configure_ad.py", "--role", "tree", "--realm", "CYBERTECH.LOCAL", "--user-prefix", "l2_"])
 
 def provision_lab3(base_dir, script_path):
     print_header("Provisioning Lab 3 (adcs-abuse-lab)")
     run_cmd(["docker", "cp", script_path, "adcs-dc:/tmp/configure_ad.py"])
-    run_cmd(["docker", "exec", "adcs-dc", "python3", "/tmp/configure_ad.py", "--role", "parent", "--realm", "ADCSLAB.LOCAL"])
-    run_cmd(["docker", "exec", "adcs-dc", "samba-tool", "user", "create", "j.doe", "StudentPass2026!", "--realm=ADCSLAB.LOCAL", "--configfile=/samba/etc/smb.conf"], check=False)
+    run_cmd(["docker", "exec", "adcs-dc", "python3", "/tmp/configure_ad.py", "--role", "parent", "--realm", "ADCSLAB.LOCAL", "--user-prefix", "l3_"])
+    run_cmd(["docker", "exec", "adcs-dc", "samba-tool", "user", "create", "l3_j.doe", "StudentPass2026!", "--realm=ADCSLAB.LOCAL", "--configfile=/samba/etc/smb.conf"], check=False)
     run_cmd(["docker", "exec", "adcs-dc", "samba-tool", "user", "setpassword", "Administrator", "--newpassword=ADCSLabAdminPass2026!", "--configfile=/samba/etc/smb.conf"])
     run_cmd(["docker", "exec", "adcs-dc", "mkdir", "-p", "/tmp/ca"])
 
 def provision_lab4(base_dir, script_path):
     print_header("Provisioning Lab 4 (trust-pivoting-lab)")
     run_cmd(["docker", "cp", script_path, "dc-foresta:/tmp/configure_ad.py"])
-    run_cmd(["docker", "exec", "dc-foresta", "python3", "/tmp/configure_ad.py", "--role", "parent", "--realm", "FORESTA.LOCAL"])
+    run_cmd(["docker", "exec", "dc-foresta", "python3", "/tmp/configure_ad.py", "--role", "parent", "--realm", "FORESTA.LOCAL", "--user-prefix", "l4a_"])
     run_cmd(["docker", "cp", script_path, "dc-forestb:/tmp/configure_ad.py"])
-    run_cmd(["docker", "exec", "dc-forestb", "python3", "/tmp/configure_ad.py", "--role", "parent", "--realm", "FORESTB.LOCAL"])
+    run_cmd(["docker", "exec", "dc-forestb", "python3", "/tmp/configure_ad.py", "--role", "parent", "--realm", "FORESTB.LOCAL", "--user-prefix", "l4b_"])
     run_cmd(["docker", "exec", "dc-foresta", "samba-tool", "user", "setpassword", "Administrator", "--newpassword=ForestAAdminPass2026!", "--configfile=/samba/etc/smb.conf"])
     run_cmd(["docker", "exec", "dc-forestb", "samba-tool", "user", "setpassword", "Administrator", "--newpassword=ForestBAdminPass2026!", "--configfile=/samba/etc/smb.conf"])
-    run_cmd(["docker", "exec", "dc-forestb", "samba-tool", "user", "create", "student", "SimpleStudentPass2026!", "--realm=FORESTB.LOCAL", "--configfile=/samba/etc/smb.conf"], check=False)
+    run_cmd(["docker", "exec", "dc-forestb", "samba-tool", "user", "create", "l4b_student", "SimpleStudentPass2026!", "--realm=FORESTB.LOCAL", "--configfile=/samba/etc/smb.conf"], check=False)
     run_cmd([
         "docker", "exec", "dc-foresta", "samba-tool", "domain", "trust", "create", "forestb.local",
         "--type=external", "--direction=both", "--create-location=both",
@@ -150,9 +150,9 @@ def provision_lab4(base_dir, script_path):
 def provision_lab5(base_dir, script_path):
     print_header("Provisioning Lab 5 (gpo-admin-pivot-lab)")
     run_cmd(["docker", "cp", script_path, "gpo-dc:/tmp/configure_ad.py"])
-    run_cmd(["docker", "exec", "gpo-dc", "python3", "/tmp/configure_ad.py", "--role", "parent", "--realm", "GPOLAB.LOCAL"])
+    run_cmd(["docker", "exec", "gpo-dc", "python3", "/tmp/configure_ad.py", "--role", "parent", "--realm", "GPOLAB.LOCAL", "--user-prefix", "l5_"])
     run_cmd(["docker", "exec", "gpo-dc", "samba-tool", "user", "setpassword", "Administrator", "--newpassword=GPOLabAdminPass2026!", "--configfile=/samba/etc/smb.conf"])
-    run_cmd(["docker", "exec", "gpo-dc", "samba-tool", "user", "create", "operator", "OperatorPass2026!", "--realm=GPOLAB.LOCAL", "--configfile=/samba/etc/smb.conf"], check=False)
+    run_cmd(["docker", "exec", "gpo-dc", "samba-tool", "user", "create", "l5_operator", "OperatorPass2026!", "--realm=GPOLAB.LOCAL", "--configfile=/samba/etc/smb.conf"], check=False)
     run_cmd(["docker", "exec", "gpo-dc", "mkdir", "-p", "/samba/state/sysvol/gpolab.local/scripts"])
     run_cmd(["docker", "exec", "gpo-dc", "chmod", "-R", "777", "/samba/state/sysvol/gpolab.local/scripts"])
     run_cmd(["docker", "exec", "gpo-dc", "sh", "-c", "echo '#!/bin/sh\necho \"System update checked\"' > /samba/state/sysvol/gpolab.local/scripts/update.sh"])
@@ -193,22 +193,22 @@ def deploy_lab(lab, base_dir, script_path):
     print(f"{BLUE}{BOLD}🚀 Deploying & Provisioning: {lab['dir']}{RESET}")
     print(f"{BLUE}{BOLD}==================================================={RESET}")
     
-    # 1. Compose Up
+
     os.chdir(os.path.join(base_dir, lab["dir"]))
     run_cmd(["docker", "compose", "up", "-d"])
     os.chdir(base_dir)
     
-    # 2. Wait for DCs to be healthy
+  
     for dc in lab["dcs"]:
         wait_for_healthy(dc)
         
     print_info("Sleeping 5s for services stabilization...")
     time.sleep(5)
     
-    # 3. Provisioning
+
     lab["prov_fn"](base_dir, script_path)
     
-    # 4. WireGuard config export
+ 
     for wg_src_sub, wg_dest_name in lab["wg"]:
         src_path = os.path.join(base_dir, lab["dir"], wg_src_sub, "peer1", "peer1.conf")
         dest_path = os.path.join(base_dir, lab["dir"], wg_dest_name)
@@ -330,7 +330,7 @@ def main():
     
     args = parser.parse_args()
 
-    # If any arguments are provided, use non-interactive mode
+  
     has_args = any([args.all, args.lab, args.stop_all, args.stop, args.clean_all, args.clean])
 
     if has_args:
@@ -391,7 +391,7 @@ def main():
                 sys.exit(1)
         return
 
-    # Interactive CLI Menu
+
     while True:
         show_banner()
         print(f" {GREEN}🚀{RESET} {BOLD}[1]{RESET} Deploy & Provision {BOLD}ALL{RESET} 10 labs {YELLOW}(Warning: Resource Intensive){RESET}")

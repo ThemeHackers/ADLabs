@@ -65,22 +65,22 @@ run_tool(["domain", "passwordsettings", "set", "--min-pwd-length=4"])
 run_tool(["domain", "passwordsettings", "set", "--history-length=0"])
 run_tool(["domain", "passwordsettings", "set", "--account-lockout-threshold=0"])
 
-run_tool(["user", "create", "r.worker", "WorkerPass2026!", "--realm=RBCDLAB.LOCAL"])
-run_tool(["user", "create", "svc_web_rbcd", "WebRBCDPass123!", "--realm=RBCDLAB.LOCAL"])
-run_tool(["user", "create", "j.intern", "InternPass2026!", "--realm=RBCDLAB.LOCAL"])
-run_tool(["user", "create", "svc_sql_rbcd", "SQLRBCDPass123!", "--realm=RBCDLAB.LOCAL"])
-run_tool(["spn", "add", "MSSQLSvc/rbcd-db.rbcdlab.local:1433", "svc_sql_rbcd"])
+run_tool(["user", "create", "l6_r.worker", "WorkerPass2026!", "--realm=RBCDLAB.LOCAL"])
+run_tool(["user", "create", "l6_svc_web_rbcd", "WebRBCDPass123!", "--realm=RBCDLAB.LOCAL"])
+run_tool(["user", "create", "l6_j.intern", "InternPass2026!", "--realm=RBCDLAB.LOCAL"])
+run_tool(["user", "create", "l6_svc_sql_rbcd", "SQLRBCDPass123!", "--realm=RBCDLAB.LOCAL"])
+run_tool(["spn", "add", "MSSQLSvc/rbcd-db.rbcdlab.local:1433", "l6_svc_sql_rbcd"])
 
-samdb.toggle_userAccountFlags("sAMAccountName=j.intern", dsdb.UF_DONT_REQUIRE_PREAUTH,
+samdb.toggle_userAccountFlags("sAMAccountName=l6_j.intern", dsdb.UF_DONT_REQUIRE_PREAUTH,
                                "dont-require-preauth", on=True, strict=False)
-samdb.toggle_userAccountFlags("sAMAccountName=j.intern", dsdb.UF_DONT_EXPIRE_PASSWD,
+samdb.toggle_userAccountFlags("sAMAccountName=l6_j.intern", dsdb.UF_DONT_EXPIRE_PASSWD,
                                "dont-expire-passwd", on=True, strict=False)
-print("[+] j.intern is AS-REP Roastable")
+print("[+] l6_j.intern is AS-REP Roastable")
 
 run_tool(["computer", "create", "srv-target"])
 run_tool(["computer", "create", "ws-corp"])
 
-r_worker_sid, _ = get_sid_and_dn("sAMAccountName=r.worker")
+r_worker_sid, _ = get_sid_and_dn("sAMAccountName=l6_r.worker")
 res_comp = samdb.search(base=domain_dn, scope=SCOPE_SUBTREE,
                         expression="sAMAccountName=srv-target$",
                         attrs=["nTSecurityDescriptor"])
@@ -92,23 +92,23 @@ if res_comp and r_worker_sid:
     msg.dn = comp_dn
     msg["nTSecurityDescriptor"] = MessageElement(ndr_pack(sd), FLAG_MOD_REPLACE, "nTSecurityDescriptor")
     samdb.modify(msg)
-    print("[+] r.worker set as Owner of srv-target$")
+    print("[+] l6_r.worker set as Owner of srv-target$")
 
 _, srv_target_dn = get_sid_and_dn("sAMAccountName=srv-target$")
 if r_worker_sid and srv_target_dn:
     grant_ace(srv_target_dn, r_worker_sid, security.SEC_GENERIC_WRITE)
-    print("[+] r.worker has GenericWrite on srv-target$ -> direct RBCD attack")
+    print("[+] l6_r.worker has GenericWrite on srv-target$ -> direct RBCD attack")
 
-svc_web_sid, _ = get_sid_and_dn("sAMAccountName=svc_web_rbcd")
+svc_web_sid, _ = get_sid_and_dn("sAMAccountName=l6_svc_web_rbcd")
 _, ws_corp_dn = get_sid_and_dn("sAMAccountName=ws-corp$")
 if svc_web_sid and ws_corp_dn:
     grant_ace(ws_corp_dn, svc_web_sid, security.SEC_GENERIC_WRITE)
-    print("[+] svc_web_rbcd has GenericWrite on ws-corp$ -> Shadow Credentials path")
+    print("[+] l6_svc_web_rbcd has GenericWrite on ws-corp$ -> Shadow Credentials path")
 
-jintern_sid, _ = get_sid_and_dn("sAMAccountName=j.intern")
-_, svcweb_dn = get_sid_and_dn("sAMAccountName=svc_web_rbcd")
+jintern_sid, _ = get_sid_and_dn("sAMAccountName=l6_j.intern")
+_, svcweb_dn = get_sid_and_dn("sAMAccountName=l6_svc_web_rbcd")
 if jintern_sid and svcweb_dn:
     grant_ace(svcweb_dn, jintern_sid, security.SEC_GENERIC_ALL)
-    print("[+] j.intern has GenericAll over svc_web_rbcd -> Password Reset -> pivot to Shadow Creds")
+    print("[+] l6_j.intern has GenericAll over l6_svc_web_rbcd -> Password Reset -> pivot to Shadow Creds")
 
 print("[+] RBCD Lab configuration complete!")
