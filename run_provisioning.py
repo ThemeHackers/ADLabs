@@ -4,11 +4,39 @@ import sys
 import time
 import argparse
 
+# Colors
+BLUE = "\033[94m"
+GREEN = "\033[92m"
+YELLOW = "\033[93m"
+RED = "\033[91m"
+MAGENTA = "\033[95m"
+CYAN = "\033[96m"
+BOLD = "\033[1m"
+RESET = "\033[0m"
+
+if os.name == 'nt':
+    os.system('') # Enable ANSI colors in Windows terminal
+
+def print_info(msg):
+    print(f"{CYAN}[*] {msg}{RESET}")
+
+def print_success(msg):
+    print(f"{GREEN}{BOLD}[+] {msg}{RESET}")
+
+def print_warning(msg):
+    print(f"{YELLOW}{BOLD}[!] {msg}{RESET}")
+
+def print_error(msg):
+    print(f"{RED}{BOLD}[x] {msg}{RESET}")
+
+def print_header(msg):
+    print(f"\n{MAGENTA}{BOLD}=== {msg} ==={RESET}")
+
 def run_cmd(cmd, check=True):
-    print(f"Executing: {' '.join(cmd)}")
+    print_info(f"Executing: {' '.join(cmd)}")
     res = subprocess.run(cmd, capture_output=True, text=True)
     if res.returncode != 0:
-        print(f"Error executing command: {res.stderr.strip()}")
+        print_error(f"Error executing command: {res.stderr.strip()}")
         if check:
             sys.exit(res.returncode)
     else:
@@ -17,26 +45,26 @@ def run_cmd(cmd, check=True):
     return res
 
 def wait_for_healthy(container_name, timeout=120):
-    print(f"Waiting for {container_name} to become healthy...", flush=True)
+    print_info(f"Waiting for {container_name} to become healthy...")
     start_time = time.time()
     while time.time() - start_time < timeout:
         res = subprocess.run(["docker", "inspect", "--format", "{{.State.Health.Status}}", container_name], capture_output=True, text=True)
         status = res.stdout.strip()
         if status == "healthy":
-            print(f"{container_name} is HEALTHY.", flush=True)
+            print_success(f"{container_name} is HEALTHY.")
             return True
         time.sleep(5)
-    print(f"WARNING: Timeout waiting for {container_name} to become healthy. Continuing anyway...")
+    print_warning(f"Timeout waiting for {container_name} to become healthy. Continuing anyway...")
     return False
 
 def process_wg_config(src_path, dest_path):
-    print(f"Waiting for WG config file: {src_path} ...", flush=True)
+    print_info(f"Waiting for WG config file: {src_path} ...")
     for _ in range(60):
         if os.path.exists(src_path):
             break
         time.sleep(1)
     if not os.path.exists(src_path):
-        print(f"Error: WG config file {src_path} not found.")
+        print_error(f"Error: WG config file {src_path} not found.")
         return False
     
     with open(src_path, "r") as f:
@@ -48,7 +76,7 @@ def process_wg_config(src_path, dest_path):
             
     with open(dest_path, "w") as f:
         f.writelines(filtered)
-    print(f"Processed and wrote: {dest_path}")
+    print_success(f"Processed and wrote: {dest_path}")
     return True
 
 def process_generated_creds(src_container, dest_dir):
@@ -70,10 +98,10 @@ def process_generated_creds(src_container, dest_dir):
             uf.write("\n".join(usernames) + "\n")
         with open(os.path.join(dest_dir, "passwords.txt"), "w") as pf:
             pf.write("\n".join(passwords) + "\n")
-        print(f"Processed credentials in {dest_dir}")
+        print_success(f"Processed credentials in {dest_dir}")
 
 def provision_lab1(base_dir, script_path):
-    print("\nProvisioning Lab 1 (oscp-network-pivot-lab)...")
+    print_header("Provisioning Lab 1 (oscp-network-pivot-lab)")
     run_cmd(["docker", "exec", "perimeter-nginx-ui", "sh", "-c", "echo 'OSCP{foothold_perimeter_breached}' > /var/flag.txt"], check=False)
     run_cmd(["docker", "exec", "perimeter-nginx-ui", "sh", "-c", "echo 'ad_audit_user:AuditServicePass2026!' > /tmp/domain_hint.txt"], check=False)
     run_cmd(["docker", "cp", script_path, "ad-forest-parent:/tmp/configure_ad.py"])
@@ -84,7 +112,7 @@ def provision_lab1(base_dir, script_path):
     process_generated_creds("ad-forest-child", os.path.join(base_dir, "oscp-network-pivot-lab", "oscp_exam_assets"))
 
 def provision_lab2(base_dir, script_path):
-    print("\nProvisioning Lab 2 (multi-domain-forest-lab)...")
+    print_header("Provisioning Lab 2 (multi-domain-forest-lab)")
     run_cmd(["docker", "cp", script_path, "mega-dc-parent:/tmp/configure_ad.py"])
     run_cmd(["docker", "exec", "mega-dc-parent", "python3", "/tmp/configure_ad.py", "--role", "parent", "--realm", "MEGACORP.LOCAL"])
     run_cmd(["docker", "cp", script_path, "mega-dc-child:/tmp/configure_ad.py"])
@@ -95,7 +123,7 @@ def provision_lab2(base_dir, script_path):
     run_cmd(["docker", "exec", "mega-dc-tree", "python3", "/tmp/configure_ad.py", "--role", "tree", "--realm", "CYBERTECH.LOCAL"])
 
 def provision_lab3(base_dir, script_path):
-    print("\nProvisioning Lab 3 (adcs-abuse-lab)...")
+    print_header("Provisioning Lab 3 (adcs-abuse-lab)")
     run_cmd(["docker", "cp", script_path, "adcs-dc:/tmp/configure_ad.py"])
     run_cmd(["docker", "exec", "adcs-dc", "python3", "/tmp/configure_ad.py", "--role", "parent", "--realm", "ADCSLAB.LOCAL"])
     run_cmd(["docker", "exec", "adcs-dc", "samba-tool", "user", "create", "j.doe", "StudentPass2026!", "--realm=ADCSLAB.LOCAL", "--configfile=/samba/etc/smb.conf"], check=False)
@@ -103,7 +131,7 @@ def provision_lab3(base_dir, script_path):
     run_cmd(["docker", "exec", "adcs-dc", "mkdir", "-p", "/tmp/ca"])
 
 def provision_lab4(base_dir, script_path):
-    print("\nProvisioning Lab 4 (trust-pivoting-lab)...")
+    print_header("Provisioning Lab 4 (trust-pivoting-lab)")
     run_cmd(["docker", "cp", script_path, "dc-foresta:/tmp/configure_ad.py"])
     run_cmd(["docker", "exec", "dc-foresta", "python3", "/tmp/configure_ad.py", "--role", "parent", "--realm", "FORESTA.LOCAL"])
     run_cmd(["docker", "cp", script_path, "dc-forestb:/tmp/configure_ad.py"])
@@ -120,7 +148,7 @@ def provision_lab4(base_dir, script_path):
     ], check=False)
 
 def provision_lab5(base_dir, script_path):
-    print("\nProvisioning Lab 5 (gpo-admin-pivot-lab)...")
+    print_header("Provisioning Lab 5 (gpo-admin-pivot-lab)")
     run_cmd(["docker", "cp", script_path, "gpo-dc:/tmp/configure_ad.py"])
     run_cmd(["docker", "exec", "gpo-dc", "python3", "/tmp/configure_ad.py", "--role", "parent", "--realm", "GPOLAB.LOCAL"])
     run_cmd(["docker", "exec", "gpo-dc", "samba-tool", "user", "setpassword", "Administrator", "--newpassword=GPOLabAdminPass2026!", "--configfile=/samba/etc/smb.conf"])
@@ -131,39 +159,39 @@ def provision_lab5(base_dir, script_path):
     run_cmd(["docker", "exec", "gpo-dc", "chmod", "+x", "/samba/state/sysvol/gpolab.local/scripts/update.sh"])
 
 def provision_lab6(base_dir, script_path):
-    print("\nProvisioning Lab 6 (rbcd-lab)...")
+    print_header("Provisioning Lab 6 (rbcd-lab)")
     run_cmd(["docker", "cp", "rbcd-lab/configure_rbcd.py", "rbcd-dc:/tmp/configure_rbcd.py"])
     run_cmd(["docker", "exec", "rbcd-dc", "python3", "/tmp/configure_rbcd.py"])
     run_cmd(["docker", "exec", "rbcd-dc", "samba-tool", "user", "setpassword", "Administrator", "--newpassword=RBCDAccessAdminPass2026!", "--configfile=/samba/etc/smb.conf"])
 
 def provision_lab7(base_dir, script_path):
-    print("\nProvisioning Lab 7 (sql-pivot-lab)...")
+    print_header("Provisioning Lab 7 (sql-pivot-lab)")
     run_cmd(["docker", "cp", "sql-pivot-lab/configure_sql.py", "sql-dc:/tmp/configure_sql.py"])
     run_cmd(["docker", "exec", "sql-dc", "python3", "/tmp/configure_sql.py"])
     run_cmd(["docker", "exec", "sql-dc", "samba-tool", "user", "setpassword", "Administrator", "--newpassword=SQLPivotAdminPass2026!", "--configfile=/samba/etc/smb.conf"])
 
 def provision_lab8(base_dir, script_path):
-    print("\nProvisioning Lab 8 (laps-lab)...")
+    print_header("Provisioning Lab 8 (laps-lab)")
     run_cmd(["docker", "cp", "laps-lab/configure_laps.py", "laps-dc:/tmp/configure_laps.py"])
     run_cmd(["docker", "exec", "laps-dc", "python3", "/tmp/configure_laps.py"])
     run_cmd(["docker", "exec", "laps-dc", "samba-tool", "user", "setpassword", "Administrator", "--newpassword=LAPSAdminPass2026!", "--configfile=/samba/etc/smb.conf"])
 
 def provision_lab9(base_dir, script_path):
-    print("\nProvisioning Lab 9 (esc8-relay-lab)...")
+    print_header("Provisioning Lab 9 (esc8-relay-lab)")
     run_cmd(["docker", "cp", "esc8-relay-lab/configure_esc8.py", "esc8-dc:/tmp/configure_esc8.py"])
     run_cmd(["docker", "exec", "esc8-dc", "python3", "/tmp/configure_esc8.py"])
     run_cmd(["docker", "exec", "esc8-dc", "samba-tool", "user", "setpassword", "Administrator", "--newpassword=ESC8AdminPass2026!", "--configfile=/samba/etc/smb.conf"])
 
 def provision_lab10(base_dir, script_path):
-    print("\nProvisioning Lab 10 (delegation-s4u-lab)...")
+    print_header("Provisioning Lab 10 (delegation-s4u-lab)")
     run_cmd(["docker", "cp", "delegation-s4u-lab/configure_delegation.py", "deleg-dc:/tmp/configure_delegation.py"])
     run_cmd(["docker", "exec", "deleg-dc", "python3", "/tmp/configure_delegation.py"])
     run_cmd(["docker", "exec", "deleg-dc", "samba-tool", "user", "setpassword", "Administrator", "--newpassword=DelegationAdminPass2026!", "--configfile=/samba/etc/smb.conf"])
 
 def deploy_lab(lab, base_dir, script_path):
-    print(f"\n==========================================")
-    print(f"Deploying & Provisioning: {lab['dir']}")
-    print(f"==========================================")
+    print(f"\n{BLUE}{BOLD}==================================================={RESET}")
+    print(f"{BLUE}{BOLD}🚀 Deploying & Provisioning: {lab['dir']}{RESET}")
+    print(f"{BLUE}{BOLD}==================================================={RESET}")
     
     # 1. Compose Up
     os.chdir(os.path.join(base_dir, lab["dir"]))
@@ -174,7 +202,7 @@ def deploy_lab(lab, base_dir, script_path):
     for dc in lab["dcs"]:
         wait_for_healthy(dc)
         
-    print("Sleeping 5s for services stabilization...", flush=True)
+    print_info("Sleeping 5s for services stabilization...")
     time.sleep(5)
     
     # 3. Provisioning
@@ -186,19 +214,34 @@ def deploy_lab(lab, base_dir, script_path):
         dest_path = os.path.join(base_dir, lab["dir"], wg_dest_name)
         process_wg_config(src_path, dest_path)
         
-    print(f"\n>>> SUCCESS: {lab['dir']} is fully deployed and provisioned.")
+    print_success(f"{lab['dir']} is fully deployed and provisioned.\n")
 
 def stop_lab(lab, base_dir):
-    print(f"\nStopping lab: {lab['dir']}...")
+    print(f"\n{YELLOW}[*] Stopping lab: {lab['dir']}...{RESET}")
     os.chdir(os.path.join(base_dir, lab["dir"]))
     run_cmd(["docker", "compose", "down"])
     os.chdir(base_dir)
+    print_success(f"Lab {lab['dir']} has stopped.")
 
 def clean_lab(lab, base_dir):
-    print(f"\nCleaning (removing volumes) lab: {lab['dir']}...")
+    print(f"\n{RED}[*] Cleaning (removing volumes) lab: {lab['dir']}...{RESET}")
     os.chdir(os.path.join(base_dir, lab["dir"]))
     run_cmd(["docker", "compose", "down", "-v"])
     os.chdir(base_dir)
+    print_success(f"Lab {lab['dir']} has been cleaned.")
+
+def show_banner():
+    banner = f"""{CYAN}{BOLD}
+======================================================
+ █████╗ ██████╗ ██╗      █████╗ ██████╗ ███████╗
+██╔══██╗██╔══██╗██║     ██╔══██╗██╔══██╗██╔════╝
+███████║██║  ██║██║     ███████║██████╔╝███████╗
+██╔══██║██║  ██║██║     ██╔══██║██╔══██╗╚════██║
+██║  ██║██████╔╝███████╗██║  ██║██████╔╝███████║
+╚═╝  ╚═╝╚═════╝ ╚══════╝╚═╝  ╚═╝╚═════╝ ╚══════╝
+{RESET}{BLUE} Active Directory Pentesting Lab Suite Manager{RESET}
+{CYAN}======================================================{RESET}"""
+    print(banner)
 
 def main():
     base_dir = os.getcwd()
@@ -291,6 +334,7 @@ def main():
     has_args = any([args.all, args.lab, args.stop_all, args.stop, args.clean_all, args.clean])
 
     if has_args:
+        show_banner()
         if args.all:
             for lab in labs_def:
                 deploy_lab(lab, base_dir, script_path)
@@ -307,7 +351,7 @@ def main():
             if matched:
                 deploy_lab(matched, base_dir, script_path)
             else:
-                print(f"Error: Lab '{target}' not found.")
+                print_error(f"Lab '{target}' not found.")
                 sys.exit(1)
         elif args.stop_all:
             for lab in labs_def:
@@ -325,7 +369,7 @@ def main():
             if matched:
                 stop_lab(matched, base_dir)
             else:
-                print(f"Error: Lab '{target}' not found.")
+                print_error(f"Lab '{target}' not found.")
                 sys.exit(1)
         elif args.clean_all:
             for lab in labs_def:
@@ -343,35 +387,34 @@ def main():
             if matched:
                 clean_lab(matched, base_dir)
             else:
-                print(f"Error: Lab '{target}' not found.")
+                print_error(f"Lab '{target}' not found.")
                 sys.exit(1)
         return
 
     # Interactive CLI Menu
     while True:
-        print("\n=======================================================")
-        print("=== UNIFIED OSCP / OSCP+ AD LABS MANAGER ===")
-        print("=======================================================")
-        print("1) Deploy & Provision ALL 10 labs (Warning: Resource Intensive)")
-        print("2) Select a specific lab to Deploy & Provision")
-        print("3) Stop ALL active labs")
-        print("4) Stop a specific active lab")
-        print("5) Clean ALL labs (Stop & Remove local docker volumes)")
-        print("6) Clean a specific lab (Stop & Remove volumes)")
-        print("7) Exit")
+        show_banner()
+        print(f" {GREEN}🚀{RESET} {BOLD}[1]{RESET} Deploy & Provision {BOLD}ALL{RESET} 10 labs {YELLOW}(Warning: Resource Intensive){RESET}")
+        print(f" {CYAN}🧪{RESET} {BOLD}[2]{RESET} Select a specific lab to Deploy & Provision")
+        print(f" {RED}⏹️ {RESET} {BOLD}[3]{RESET} Stop {BOLD}ALL{RESET} active labs")
+        print(f" {YELLOW}⏸️ {RESET} {BOLD}[4]{RESET} Stop a specific active lab")
+        print(f" {RED}🧹{RESET} {BOLD}[5]{RESET} Clean {BOLD}ALL{RESET} labs (Stop & Remove local docker volumes)")
+        print(f" {RED}🗑️ {RESET} {BOLD}[6]{RESET} Clean a specific lab (Stop & Remove volumes)")
+        print(f" {BLUE}🚪{RESET} {BOLD}[7]{RESET} Exit")
+        print(f"{CYAN}======================================================{RESET}")
         
-        choice = input("Enter choice (1-7): ").strip()
+        choice = input(f"{BOLD}Enter choice (1-7): {RESET}").strip()
         
         if choice == "1":
-            confirm = input("Are you sure you want to run all 10 labs? This requires significant RAM. (y/n): ").strip().lower()
+            confirm = input(f"{YELLOW}{BOLD}[!] Are you sure you want to run all 10 labs? This requires significant RAM. (y/n): {RESET}").strip().lower()
             if confirm == 'y':
                 for lab in labs_def:
                     deploy_lab(lab, base_dir, script_path)
         elif choice == "2":
-            print("\nAvailable Labs:")
+            print(f"\n{BOLD}{CYAN}--- Available Labs ---{RESET}")
             for lab in labs_def:
-                print(f"{lab['index']}. {lab['dir']}")
-            lab_choice = input(f"Enter lab index (1-{len(labs_def)}): ").strip()
+                print(f"  {BOLD}{lab['index']}){RESET} {lab['dir']}")
+            lab_choice = input(f"\n{BOLD}Enter lab index (1-{len(labs_def)}): {RESET}").strip()
             matched = None
             for lab in labs_def:
                 if lab_choice.isdigit() and int(lab_choice) == lab["index"]:
@@ -380,15 +423,19 @@ def main():
             if matched:
                 deploy_lab(matched, base_dir, script_path)
             else:
-                print("Invalid selection.")
+                print_error("Invalid selection.")
+            input(f"\nPress Enter to return to main menu...")
         elif choice == "3":
-            for lab in labs_def:
-                stop_lab(lab, base_dir)
+            confirm = input(f"{YELLOW}{BOLD}[!] Are you sure you want to stop all labs? (y/n): {RESET}").strip().lower()
+            if confirm == 'y':
+                for lab in labs_def:
+                    stop_lab(lab, base_dir)
+            input(f"\nPress Enter to return to main menu...")
         elif choice == "4":
-            print("\nActive Labs:")
+            print(f"\n{BOLD}{CYAN}--- Active Labs ---{RESET}")
             for lab in labs_def:
-                print(f"{lab['index']}. {lab['dir']}")
-            lab_choice = input(f"Enter lab index to stop (1-{len(labs_def)}): ").strip()
+                print(f"  {BOLD}{lab['index']}){RESET} {lab['dir']}")
+            lab_choice = input(f"\n{BOLD}Enter lab index to stop (1-{len(labs_def)}): {RESET}").strip()
             matched = None
             for lab in labs_def:
                 if lab_choice.isdigit() and int(lab_choice) == lab["index"]:
@@ -397,17 +444,19 @@ def main():
             if matched:
                 stop_lab(matched, base_dir)
             else:
-                print("Invalid selection.")
+                print_error("Invalid selection.")
+            input(f"\nPress Enter to return to main menu...")
         elif choice == "5":
-            confirm = input("This will destroy all databases and AD states for all labs. Proceed? (y/n): ").strip().lower()
+            confirm = input(f"{RED}{BOLD}[!] WARNING: This will destroy all databases and AD states for all labs. Proceed? (y/n): {RESET}").strip().lower()
             if confirm == 'y':
                 for lab in labs_def:
                     clean_lab(lab, base_dir)
+            input(f"\nPress Enter to return to main menu...")
         elif choice == "6":
-            print("\nAvailable Labs:")
+            print(f"\n{BOLD}{CYAN}--- Available Labs ---{RESET}")
             for lab in labs_def:
-                print(f"{lab['index']}. {lab['dir']}")
-            lab_choice = input(f"Enter lab index to clean (1-{len(labs_def)}): ").strip()
+                print(f"  {BOLD}{lab['index']}){RESET} {lab['dir']}")
+            lab_choice = input(f"\n{BOLD}Enter lab index to clean (1-{len(labs_def)}): {RESET}").strip()
             matched = None
             for lab in labs_def:
                 if lab_choice.isdigit() and int(lab_choice) == lab["index"]:
@@ -416,12 +465,14 @@ def main():
             if matched:
                 clean_lab(matched, base_dir)
             else:
-                print("Invalid selection.")
+                print_error("Invalid selection.")
+            input(f"\nPress Enter to return to main menu...")
         elif choice == "7":
-            print("Exiting...")
+            print_info("Exiting...")
             break
         else:
-            print("Invalid option. Please try again.")
+            print_error("Invalid option. Please try again.")
+            time.sleep(1)
 
 if __name__ == '__main__':
     main()
