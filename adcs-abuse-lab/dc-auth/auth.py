@@ -6,16 +6,18 @@ import urllib.parse
 import re
 
 PORT = 8000
-CA_CERT = "/tmp/ca/ca.crt" # Mounted from shared volume
+CA_CERT = "/tmp/ca/ca.crt"
 
 class PKINITAuthHandler(http.server.BaseHTTPRequestHandler):
+
+    def log_message(self, format, *args):
+        pass
+
     def do_GET(self):
         if self.path == "/" or self.path == "/pkinit":
             self.send_response(200)
             self.send_header("Content-type", "text/html; charset=utf-8")
             self.end_headers()
-            
-            # Simple form to paste cert
             html = """<!DOCTYPE html>
 <html>
 <head>
@@ -32,7 +34,7 @@ class PKINITAuthHandler(http.server.BaseHTTPRequestHandler):
 </head>
 <body>
     <div class="container">
-        <h2>PKINIT Mock Authentication Gateway (ADCSLAB.LOCAL)</h2>
+        <h2>PKINIT Authentication Gateway (ADCSLAB.LOCAL)</h2>
         <p>Paste your issued PEM certificate here to authenticate and request the NT hash of your session ticket.</p>
         <form method="POST" action="/pkinit">
             <label for="cert">PEM Certificate:</label>
@@ -52,29 +54,27 @@ class PKINITAuthHandler(http.server.BaseHTTPRequestHandler):
             content_length = int(self.headers['Content-Length'])
             post_data = self.rfile.read(content_length).decode('utf-8')
             params = urllib.parse.parse_qs(post_data)
-            
+
             cert_data = params.get('cert', [''])[0].strip()
             if not cert_data:
                 self.send_response(400)
                 self.wfile.write(b"Error: Certificate is empty.")
                 return
 
-            # Save cert to temp file
             cert_path = "/tmp/client.crt"
             with open(cert_path, "w") as f:
                 f.write(cert_data)
 
-            # 1. Verify certificate against Root CA
             if not os.path.exists(CA_CERT):
                 self.send_response(500)
                 self.send_header("Content-type", "text/plain")
                 self.end_headers()
-                self.wfile.write(b"Error: Root CA certificate not found on Domain Controller. PKI setup incomplete.")
+                self.wfile.write(b"Error: Root CA certificate not found. PKI setup incomplete.")
                 return
 
             verify_cmd = ["openssl", "verify", "-CAfile", CA_CERT, cert_path]
             res_verify = subprocess.run(verify_cmd, capture_output=True, text=True)
-            
+
             if res_verify.returncode != 0:
                 self.send_response(403)
                 self.send_header("Content-type", "text/html; charset=utf-8")
@@ -83,38 +83,31 @@ class PKINITAuthHandler(http.server.BaseHTTPRequestHandler):
                 self.wfile.write(html.encode("utf-8"))
                 return
 
-            # 2. Extract SAN (UPN)
             san_cmd = ["openssl", "x509", "-in", cert_path, "-noout", "-ext", "subjectAltName"]
             res_san = subprocess.run(san_cmd, capture_output=True, text=True)
-            
-            # Search for UPN (UTF8 string in subjectAltName)
-            # The structure in openssl output usually looks like:
-            # "otherName: 1.3.6.1.4.1.311.20.2.3;UTF8::username@domain.local"
-            # or "otherName: 1.3.6.1.4.1.311.20.2.3;UTF8:username@domain.local"
             san_text = res_san.stdout
             upn_match = re.search(r"UTF8::?([^,\s\n]+)", san_text)
-            
+
             if not upn_match:
                 self.send_response(403)
                 self.send_header("Content-type", "text/html; charset=utf-8")
                 self.end_headers()
-                html = f"""<html><body><h2>Authentication Failed</h2><p>Certificate is valid, but no User Principal Name (UPN) Subject Alternative Name (SAN) was found.</p><pre>{san_text}</pre></body></html>"""
+                html = f"""<html><body><h2>Authentication Failed</h2><p>Certificate is valid but no UPN SAN was found.</p><pre>{san_text}</pre></body></html>"""
                 self.wfile.write(html.encode("utf-8"))
                 return
 
             upn = upn_match.group(1)
-            # Extract sAMAccountName from UPN (e.g. Administrator@ADCSLAB.LOCAL -> Administrator)
             username = upn.split("@")[0]
-            
-            print(f"Authenticating user: {username} (UPN: {upn})", flush=True)
 
-            # 3. Retrieve NT Hash via samba-tool
+            print(f"[+] PKINIT auth: {username} ({upn})", flush=True)
+
             samba_cmd = [
                 "samba-tool", "user", "getpassword", username,
+                "--attributes=nthash",
                 "--configfile=/samba/etc/smb.conf"
             ]
             res_samba = subprocess.run(samba_cmd, capture_output=True, text=True)
-            
+
             if res_samba.returncode != 0:
                 self.send_response(500)
                 self.send_header("Content-type", "text/html; charset=utf-8")
@@ -123,27 +116,22 @@ class PKINITAuthHandler(http.server.BaseHTTPRequestHandler):
                 self.wfile.write(html.encode("utf-8"))
                 return
 
-            # Extract NT Hash from output
-            # Output of samba-tool user getpassword username contains:
-            # "nthash: <hash>"
             samba_out = res_samba.stdout
             hash_match = re.search(r"nthash:\s*([a-fA-F0-9]{32})", samba_out)
-            
+
             if not hash_match:
                 self.send_response(500)
                 self.send_header("Content-type", "text/html; charset=utf-8")
                 self.end_headers()
-                html = f"""<html><body><h2>Internal Error</h2><p>Could not extract NT Hash from Samba database output.</p><pre>{samba_out}</pre></body></html>"""
+                html = f"""<html><body><h2>Internal Error</h2><p>Could not extract NT Hash from Samba output.</p><pre>{samba_out}</pre></body></html>"""
                 self.wfile.write(html.encode("utf-8"))
                 return
-                
+
             nthash = hash_match.group(1)
 
-            # Return success and NT Hash!
             self.send_response(200)
             self.send_header("Content-type", "text/html; charset=utf-8")
             self.end_headers()
-            
             html = f"""<!DOCTYPE html>
 <html>
 <head>
@@ -163,13 +151,10 @@ class PKINITAuthHandler(http.server.BaseHTTPRequestHandler):
             <p><strong>Authenticated Principal (UPN):</strong> {upn}</p>
             <p><strong>sAMAccountName:</strong> {username}</p>
         </div>
-        
-        <p>Below is your Session NT Hash. You can use this for Pass-the-Hash (PtH) or authentication attacks:</p>
+        <p>NT Hash (use for Pass-the-Hash):</p>
         <pre>{nthash}</pre>
-        
-        <p><strong>NXC / Impacket PtH Command Example:</strong></p>
+        <p><strong>Impacket PtH Command:</strong></p>
         <pre>impacket-wmiexec -hashes 'aad3b435b51404eeaad3b435b51404ee:{nthash}' ADCSLAB.LOCAL/{username}@10.102.10.10</pre>
-        
         <a href="/pkinit">Back to Login Gateway</a>
     </div>
 </body>
@@ -182,5 +167,5 @@ class PKINITAuthHandler(http.server.BaseHTTPRequestHandler):
 if __name__ == "__main__":
     handler = PKINITAuthHandler
     with socketserver.TCPServer(("", PORT), handler) as httpd:
-        print(f"PKINIT Auth Gateway running on port {PORT}...", flush=True)
+        print(f"[+] PKINIT Auth Gateway running on port {PORT}", flush=True)
         httpd.serve_forever()

@@ -67,7 +67,7 @@ services:
     volumes:
       - ./ca_server.py:/tmp/ca_server.py
     command: >
-      sh -c "apt-get update && apt-get install -y iproute2 procps &&
+      sh -c "apt-get update && apt-get install -y iproute2 procps openssl &&
              ip route add 10.108.10.0/24 via 10.108.20.254 || true;
              python3 /tmp/ca_server.py"
     networks:
