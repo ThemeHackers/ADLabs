@@ -245,24 +245,159 @@ If you prefer to connect to the WireGuard VPN directly inside your WSL2 Ubuntu t
 
 ## 4. How to Manage & Provision Labs
 
-You can use the unified management script **`run_provisioning.py`** to start, stop, clean up, and provision all labs.
+You can manage labs using either the **Web Dashboard** (recommended) or the **CLI script**. All core utility scripts are located in the `core/` folder.
 
-### Interactive Mode (Recommended)
+### Web Dashboard (Recommended)
+
+A modern web-based management interface is available for easier lab management:
+
+#### Starting the Web Dashboard
+```bash
+python web/app.py
+```
+
+The dashboard will be available at `http://127.0.0.1:8000`
+
+#### Web Dashboard Features
+- **Real-time Lab Status**: View running status of all 10 labs with container health indicators
+- **Deploy Labs**: Start individual labs or all labs with one click
+- **Stop Labs**: Stop individual labs or all running labs
+- **Clean Labs**: Remove lab containers and volumes to reset state
+- **Test Connectivity**: Verify network connectivity and container health
+- **VPN Profile Management**: Download WireGuard configuration files directly from the interface
+- **Global Actions**: Stop all labs, clean all labs, rebuild wordlists
+- **Live Execution Log**: View real-time command output during operations
+
+#### Web Dashboard Requirements
+- Python 3.7+
+- Flask (`pip install flask`)
+- Docker running on the host
+
+---
+
+### CLI Management Script
+
+You can also use the unified management script **`adlabs.py`** to start, stop, clean up, provision, test connectivity, and generate wordlists for all labs.
+
+#### Interactive Mode (Recommended)
 Simply run the script without any arguments to open the interactive CLI manager menu:
 ```bash
-python run_provisioning.py
+python adlabs.py
 ```
 This menu allows you to:
 - Deploy and provision all 10 labs at once.
 - **Select a specific lab to deploy and provision** (highly recommended if you have limited RAM/CPU resources).
 - Stop all or specific active labs.
 - Clean up all or specific labs (stops containers and deletes local database/AD state volumes).
+- Test connectivity and container health of all or specific labs.
+- Generate and recreate wordlists (`users.txt` and `pass.txt`) for brute-forcing practice.
 
-### Non-Interactive Command-Line Mode
+#### Non-Interactive Command-Line Mode
 You can also automate lab management by passing flags:
-* **Deploy All Labs**: `python run_provisioning.py --all`
-* **Deploy a Specific Lab**: `python run_provisioning.py --lab <index_or_name>` (e.g., `python run_provisioning.py --lab 8` or `python run_provisioning.py --lab laps-lab`)
-* **Stop All Labs**: `python run_provisioning.py --stop-all`
-* **Stop a Specific Lab**: `python run_provisioning.py --stop <index_or_name>`
-* **Clean All Labs (Stops & Removes volumes)**: `python run_provisioning.py --clean-all`
-* **Clean a Specific Lab**: `python run_provisioning.py --clean <index_or_name>`
+* **Deploy All Labs**: `python adlabs.py --all` (or `-a`)
+* **Deploy a Specific Lab**: `python adlabs.py --lab <index_or_name>` (or `-l <index_or_name>`, e.g., `python adlabs.py --lab 8` or `python adlabs.py --lab laps-lab`)
+* **Stop All Labs**: `python adlabs.py --stop-all`
+* **Stop a Specific Lab**: `python adlabs.py --stop <index_or_name>`
+* **Clean All Labs (Stops & Removes volumes)**: `python adlabs.py --clean-all`
+* **Clean a Specific Lab**: `python adlabs.py --clean <index_or_name>`
+* **Test All Labs Connectivity**: `python adlabs.py --test-all`
+* **Test a Specific Lab Connectivity**: `python adlabs.py --test <index_or_name>`
+* **Generate Wordlists**: `python adlabs.py --generate-wordlists`
+
+---
+
+## 5. Project Structure
+
+```
+ADLabs/
+├── adlabs.py                 # Main CLI management script
+├── web/                      # Web dashboard interface
+│   ├── app.py               # Flask application
+│   ├── static/              # CSS and JavaScript files
+│   │   ├── style.css       # Dashboard styles
+│   │   └── dashboard.js    # Dashboard logic
+│   └── templates/          # HTML templates
+│       └── index.html      # Main dashboard page
+├── core/                     # Core utility scripts
+│   ├── adlabs_daemon.py    # Background daemon for lab operations
+│   ├── configure_ad.py     # AD domain configuration
+│   ├── generate_wordlists.py  # Wordlist generation
+│   └── uac.py              # UAC bypass utilities
+├── oscp-network-pivot-lab/   # Lab 1: Network Pivoting
+├── multi-domain-forest-lab/  # Lab 2: Multi-Domain Forest
+├── adcs-abuse-lab/           # Lab 3: AD CS Certificate Abuse
+├── trust-pivoting-lab/       # Lab 4: Trust & Forest Pivoting
+├── gpo-admin-pivot-lab/      # Lab 5: GPO & Client Workstation Pivot
+├── rbcd-lab/                 # Lab 6: Resource-Based Constrained Delegation
+├── sql-pivot-lab/            # Lab 7: SQL Database Link Pivoting
+├── laps-lab/                 # Lab 8: LAPS & Local Admin Password Leak
+├── esc8-relay-lab/           # Lab 9: AD CS NTLM Relay (ESC8)
+└── delegation-s4u-lab/       # Lab 10: Constrained Delegation (S4U)
+```
+
+---
+
+## 6. Requirements
+
+### System Requirements
+- **Docker**: Version 20.10 or higher
+- **Docker Compose**: Version 2.0 or higher
+- **Python**: Version 3.7 or higher
+- **RAM**: Minimum 8GB (16GB+ recommended for running multiple labs)
+- **Disk Space**: Minimum 10GB free space
+
+### Python Dependencies
+```bash
+pip install flask
+```
+
+### Network Requirements
+- UDP ports 51820-51829 available on host (for WireGate VPN gateways)
+- No conflicting services on target subnets (10.x.x.x ranges)
+
+---
+
+## 7. Troubleshooting
+
+### Common Issues
+
+**Lab containers fail to start**
+- Ensure Docker daemon is running: `docker ps`
+- Check for port conflicts on UDP ports 51820-51829
+- Verify sufficient RAM/CPU resources available
+
+**WireGuard connection fails**
+- Ensure only one lab tunnel is active at a time
+- Check that the correct .conf file is imported
+- Verify the lab containers are running before activating the tunnel
+
+**Web dashboard won't start**
+- Ensure Flask is installed: `pip install flask`
+- Check that port 8000 is not already in use
+- Verify Python 3.7+ is installed
+
+**Lab state persists after cleanup**
+- Use `--clean` instead of `--stop` to remove volumes
+- Manually remove volumes: `docker volume ls` and `docker volume rm <volume>`
+
+### Getting Help
+- Check individual lab directories for specific configuration files
+- Review container logs: `docker logs <container_name>`
+- Test connectivity: `python adlabs.py --test <lab_name>`
+
+---
+
+## 8. License
+
+This project is intended for educational purposes and penetration testing practice. Use responsibly and only on systems you have authorization to test.
+
+---
+
+## 9. Contributing
+
+Contributions are welcome! Please ensure:
+- All labs follow the established directory structure
+- Documentation is updated for any new features
+- Code follows Python best practices
+- Security implications are considered for any changes
+

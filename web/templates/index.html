@@ -1,0 +1,174 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>ADLabs Management</title>
+    <!-- Fonts -->
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link href="https://fonts.googleapis.com/css2?family=Google+Sans:wght@400;500;700&family=Google+Sans+Mono:wght@400;700&family=JetBrains+Mono:wght@400;700&display=swap" rel="stylesheet">
+    <link href="https://fonts.cdnfonts.com/css/google-sans" rel="stylesheet">
+    <!-- Stylesheet -->
+    <link rel="stylesheet" href="/static/style.css?v=1.0.9">
+    <!-- Lucide Icons -->
+    <script src="https://unpkg.com/lucide@latest"></script>
+</head>
+<body>
+    <div class="app-container">
+        <!-- Sidebar / Header -->
+        <header class="app-header">
+            <div class="logo-area">
+                <div class="logo-icon">⚡</div>
+                <div class="logo-text">
+                    <h1>ADLabs</h1>
+                    <span>Pentesting Lab Suite Manager</span>
+                </div>
+            </div>
+            
+            <div class="global-actions">
+                <button class="btn btn-warning" id="btn-global-stop">
+                    <i data-lucide="square"></i> <span class="btn-text">Stop All Labs</span>
+                </button>
+                <button class="btn btn-danger" id="btn-global-clean">
+                    <i data-lucide="trash-2"></i> <span class="btn-text">Clean All Labs</span>
+                </button>
+                <button class="btn btn-secondary" id="btn-global-wordlists">
+                    <i data-lucide="file-text"></i> <span class="btn-text">Rebuild Wordlists</span>
+                </button>
+            </div>
+        </header>
+
+        <!-- Main Content -->
+        <main class="dashboard-grid" id="labs-container">
+            <div class="skeleton-card">
+                <div class="skeleton-header">
+                    <div>
+                        <div class="skeleton-line" style="width: 50px; height: 10px;"></div>
+                        <div class="skeleton-line" style="width: 160px; height: 20px; margin-top: 6px;"></div>
+                    </div>
+                    <div class="skeleton-badge"></div>
+                </div>
+                <div class="skeleton-details">
+                    <div class="skeleton-detail-row">
+                        <div class="skeleton-line" style="width: 60px; height: 11px;"></div>
+                        <div class="skeleton-line" style="width: 80px; height: 11px;"></div>
+                    </div>
+                    <div class="skeleton-detail-row">
+                        <div class="skeleton-line" style="width: 55px; height: 11px;"></div>
+                        <div class="skeleton-line" style="width: 130px; height: 11px;"></div>
+                    </div>
+                    <div class="skeleton-detail-row">
+                        <div class="skeleton-line" style="width: 70px; height: 11px;"></div>
+                        <div class="skeleton-line" style="width: 50px; height: 11px;"></div>
+                    </div>
+                </div>
+                <div class="skeleton-actions">
+                    <div class="skeleton-line" style="width: 72px; height: 32px; border-radius: 6px;"></div>
+                    <div class="skeleton-line" style="width: 56px; height: 32px; border-radius: 6px;"></div>
+                    <div class="skeleton-line" style="width: 60px; height: 32px; border-radius: 6px;"></div>
+                    <div style="flex:1"></div>
+                    <div class="skeleton-line" style="width: 56px; height: 32px; border-radius: 6px;"></div>
+                    <div class="skeleton-line" style="width: 32px; height: 32px; border-radius: 6px;"></div>
+                </div>
+                <div class="skeleton-line" style="width: 100%; height: 40px; border-radius: 8px;"></div>
+            </div>
+            <div class="skeleton-card" style="animation-delay: 0.1s;">
+                <div class="skeleton-header">
+                    <div>
+                        <div class="skeleton-line" style="width: 50px; height: 10px;"></div>
+                        <div class="skeleton-line" style="width: 140px; height: 20px; margin-top: 6px;"></div>
+                    </div>
+                    <div class="skeleton-badge"></div>
+                </div>
+                <div class="skeleton-details">
+                    <div class="skeleton-detail-row">
+                        <div class="skeleton-line" style="width: 60px; height: 11px;"></div>
+                        <div class="skeleton-line" style="width: 80px; height: 11px;"></div>
+                    </div>
+                    <div class="skeleton-detail-row">
+                        <div class="skeleton-line" style="width: 55px; height: 11px;"></div>
+                        <div class="skeleton-line" style="width: 110px; height: 11px;"></div>
+                    </div>
+                    <div class="skeleton-detail-row">
+                        <div class="skeleton-line" style="width: 70px; height: 11px;"></div>
+                        <div class="skeleton-line" style="width: 50px; height: 11px;"></div>
+                    </div>
+                </div>
+                <div class="skeleton-actions">
+                    <div class="skeleton-line" style="width: 72px; height: 32px; border-radius: 6px;"></div>
+                    <div class="skeleton-line" style="width: 56px; height: 32px; border-radius: 6px;"></div>
+                    <div class="skeleton-line" style="width: 60px; height: 32px; border-radius: 6px;"></div>
+                    <div style="flex:1"></div>
+                    <div class="skeleton-line" style="width: 56px; height: 32px; border-radius: 6px;"></div>
+                    <div class="skeleton-line" style="width: 32px; height: 32px; border-radius: 6px;"></div>
+                </div>
+                <div class="skeleton-line" style="width: 100%; height: 40px; border-radius: 8px;"></div>
+            </div>
+            <div class="skeleton-card" style="animation-delay: 0.2s;">
+                <div class="skeleton-header">
+                    <div>
+                        <div class="skeleton-line" style="width: 50px; height: 10px;"></div>
+                        <div class="skeleton-line" style="width: 180px; height: 20px; margin-top: 6px;"></div>
+                    </div>
+                    <div class="skeleton-badge"></div>
+                </div>
+                <div class="skeleton-details">
+                    <div class="skeleton-detail-row">
+                        <div class="skeleton-line" style="width: 60px; height: 11px;"></div>
+                        <div class="skeleton-line" style="width: 80px; height: 11px;"></div>
+                    </div>
+                    <div class="skeleton-detail-row">
+                        <div class="skeleton-line" style="width: 55px; height: 11px;"></div>
+                        <div class="skeleton-line" style="width: 120px; height: 11px;"></div>
+                    </div>
+                    <div class="skeleton-detail-row">
+                        <div class="skeleton-line" style="width: 70px; height: 11px;"></div>
+                        <div class="skeleton-line" style="width: 50px; height: 11px;"></div>
+                    </div>
+                </div>
+                <div class="skeleton-actions">
+                    <div class="skeleton-line" style="width: 72px; height: 32px; border-radius: 6px;"></div>
+                    <div class="skeleton-line" style="width: 56px; height: 32px; border-radius: 6px;"></div>
+                    <div class="skeleton-line" style="width: 60px; height: 32px; border-radius: 6px;"></div>
+                    <div style="flex:1"></div>
+                    <div class="skeleton-line" style="width: 56px; height: 32px; border-radius: 6px;"></div>
+                    <div class="skeleton-line" style="width: 32px; height: 32px; border-radius: 6px;"></div>
+                </div>
+                <div class="skeleton-line" style="width: 100%; height: 40px; border-radius: 8px;"></div>
+            </div>
+        </main>
+
+    </div>
+
+    <!-- Target Info Modal -->
+    <div class="modal-overlay" id="targets-modal">
+        <div class="modal-card">
+            <div class="modal-header">
+                <h3 id="modal-lab-name">Lab targets</h3>
+                <button class="modal-close" id="btn-close-modal">&times;</button>
+            </div>
+            <div class="modal-body" id="modal-targets-content">
+                <!-- Target lists go here -->
+            </div>
+        </div>
+    </div>
+
+    <div class="modal-overlay" id="global-log-modal">
+        <div class="modal-card" style="max-width: 600px;">
+            <div class="modal-header">
+                <h3 id="global-modal-title">Global Execution Log</h3>
+                <button class="modal-close" id="btn-close-global-modal" disabled>&times;</button>
+            </div>
+            <div class="modal-body" id="global-log-body" style="background-color: rgba(0,0,0,0.2); font-family: var(--font-mono); font-size: 0.75rem; line-height: 1.5; overflow-y: auto; padding: 1rem;">
+            </div>
+            <div class="modal-footer" style="padding: 1rem; display: flex; justify-content: flex-end; border-top: 1px solid rgba(255,255,255,0.03); gap: 0.5rem;">
+                <button class="btn btn-secondary" id="btn-close-global-modal-footer" disabled>Close</button>
+            </div>
+        </div>
+    </div>
+
+    <!-- JavaScript Controller -->
+    <script src="/static/dashboard.js?v=1.1.0"></script>
+</body>
+</html>

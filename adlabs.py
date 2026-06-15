@@ -36,14 +36,31 @@ def print_header(msg):
 
 def run_cmd(cmd, check=True):
     print_info(f"Executing: {' '.join(cmd)}")
-    res = subprocess.run(cmd, capture_output=True, text=True)
+    process = subprocess.Popen(
+        cmd,
+        stdout=subprocess.PIPE,
+        stderr=subprocess.STDOUT,
+        text=True,
+        bufsize=1
+    )
+    stdout_lines = []
+    for line in iter(process.stdout.readline, ''):
+        print(line, end='', flush=True)
+        stdout_lines.append(line)
+    process.stdout.close()
+    return_code = process.wait()
+    
+    class MockCompletedProcess:
+        def __init__(self, returncode, stdout, stderr):
+            self.returncode = returncode
+            self.stdout = stdout
+            self.stderr = stderr
+            
+    res = MockCompletedProcess(return_code, ''.join(stdout_lines), '')
     if res.returncode != 0:
-        print_error(f"Error executing command: {res.stderr.strip()}")
+        print_error(f"Error executing command: exit code {res.returncode}")
         if check:
             sys.exit(res.returncode)
-    else:
-        if res.stdout:
-            print(res.stdout.strip())
     return res
 
 def wait_for_healthy(container_name, timeout=120):
@@ -119,15 +136,14 @@ def process_generated_creds(src_container, dest_dir):
             pf.write("\n".join(passwords) + "\n")
         print_success(f"Processed credentials in {dest_dir}")
 
+
 def provision_lab1(base_dir, script_path):
     print_header("Provisioning Lab 1 (oscp-network-pivot-lab)")
     run_cmd(["docker", "exec", "perimeter-nginx-ui", "sh", "-c", "echo 'OSCP{foothold_perimeter_breached}' > /var/flag.txt"], check=False)
     
-  
     run_cmd(["docker", "exec", "perimeter-nginx-ui", "sh", "-c", "mkdir -p /var/www/html && printf '[database]\\ndb_host = 10.20.20.20\\ndb_port = 5432\\ndb_user = postgres\\ndb_pass = DB_Prod_Admin_SuperSecure_Pass2026!\\ndb_name = production\\n' > /var/www/html/db_settings.conf"], check=False)
     run_cmd(["docker", "exec", "perimeter-nginx-ui", "sh", "-c", "printf '[database]\\ndb_host = 10.20.20.20\\ndb_port = 5432\\ndb_user = postgres\\ndb_pass = DB_Prod_Admin_SuperSecure_Pass2026!\\ndb_name = production\\n' > /tmp/db_config.txt"], check=False)
     
-   
     print_info("Waiting for internal-postgres-db to accept connections...")
     db_ready = False
     for _ in range(15):
@@ -152,6 +168,13 @@ def provision_lab1(base_dir, script_path):
     practice_users_l1 = "j.smith r.jones m.brown t.taylor d.miller j.wilson b.moore s.taylor a.anderson k.thomas c.jackson m.white l.harris e.martin r.clark s.lewis g.robinson j.walker k.young p.allen"
     run_cmd(["docker", "exec", "ad-forest-child", "python3", "/tmp/configure_ad.py", "--role", "child", "--realm", "HQ.MEGACORP.LOCAL", "--practice-users", practice_users_l1, "--user-prefix", "l1_"])
     process_generated_creds("ad-forest-child", os.path.join(base_dir, "oscp-network-pivot-lab", "oscp_exam_assets"))
+    
+    print_info("Applying anti-cheat network isolation rules to WireGuard gateway...")
+    run_cmd(["docker", "exec", "oscp-wg-gateway", "iptables", "-I", "FORWARD", "-i", "wg0", "-d", "10.20.20.20", "-p", "tcp", "--dport", "5432", "-j", "ACCEPT"], check=False)
+    run_cmd(["docker", "exec", "oscp-wg-gateway", "iptables", "-I", "FORWARD", "-i", "wg0", "-d", "10.20.20.30", "-p", "tcp", "--dport", "6379", "-j", "ACCEPT"], check=False)
+    run_cmd(["docker", "exec", "oscp-wg-gateway", "iptables", "-A", "FORWARD", "-i", "wg0", "-d", "10.20.20.0/24", "-j", "DROP"], check=False)
+    run_cmd(["docker", "exec", "oscp-wg-gateway", "iptables", "-A", "FORWARD", "-i", "wg0", "-d", "10.100.10.0/24", "-j", "DROP"], check=False)
+
 
 def provision_lab2(base_dir, script_path):
     print_header("Provisioning Lab 2 (multi-domain-forest-lab)")
@@ -189,7 +212,6 @@ def provision_lab4(base_dir, script_path):
         "--configfile=/samba/etc/smb.conf"
     ], check=False)
 
- 
     res_sid = run_cmd(["docker", "exec", "dc-forestb", "python3", "-c",
                        "import samba, samba.param, samba.samdb, samba.ndr, samba.dcerpc.security; "
                        "lp=samba.param.LoadParm(); lp.load('/samba/etc/smb.conf'); "
@@ -200,9 +222,7 @@ def provision_lab4(base_dir, script_path):
     student_sid = res_sid.stdout.strip()
     print_info(f"Retrieved Forest B student SID: {student_sid}")
 
-  
     run_cmd(["docker", "exec", "dc-foresta", "samba-tool", "group", "add", "l4a_helpdesk", "--configfile=/samba/etc/smb.conf"], check=False)
-    
     run_cmd(["docker", "exec", "dc-foresta", "samba-tool", "group", "addmembers", "l4a_helpdesk", student_sid, "--configfile=/samba/etc/smb.conf"], check=False)
 
     temp_script_path = os.path.join(base_dir, "temp_trust_acl.py")
@@ -252,6 +272,10 @@ except Exception as e:
     if os.path.exists(temp_script_path):
         os.remove(temp_script_path)
 
+    print_info("Applying anti-cheat network isolation rules to WireGuard gateway...")
+    run_cmd(["docker", "exec", "trust-wg-gateway", "iptables", "-A", "FORWARD", "-i", "wg0", "-d", "10.103.10.0/24", "-j", "DROP"], check=False)
+
+
 def provision_lab5(base_dir, script_path):
     print_header("Provisioning Lab 5 (gpo-admin-pivot-lab)")
     run_cmd(["docker", "cp", script_path, "gpo-dc:/tmp/configure_ad.py"])
@@ -263,13 +287,11 @@ def provision_lab5(base_dir, script_path):
     run_cmd(["docker", "exec", "gpo-dc", "sh", "-c", "echo '#!/bin/sh\necho \"System update checked\"' > /samba/state/sysvol/gpolab.local/scripts/update.sh"])
     run_cmd(["docker", "exec", "gpo-dc", "chmod", "+x", "/samba/state/sysvol/gpolab.local/scripts/update.sh"])
     
-   
     print_info("Creating authentic GPO GUID folder structure...")
     gpo_guid = "{3137632E-FA86-4d0f-A02F-A5C94B3C53F7}"
     gpo_path = f"/samba/state/sysvol/gpolab.local/Policies/{gpo_guid}/Machine/Preferences/Groups"
     run_cmd(["docker", "exec", "gpo-dc", "mkdir", "-p", gpo_path], check=False)
     
-   
     groups_xml = """<?xml version="1.0" encoding="utf-8"?>
 <Groups clsid="{3125E73C-5169-448C-889E-1ECC56BAA9A4}">
   <User clsid="{DF5F1855-0E2C-4586-819E-E8C4B5D487E0}" name="LocalAdmin" image="2" changed="2026-01-01 00:00:00" uid="{GUID}" userContext="0" removePolicy="0">
@@ -279,7 +301,6 @@ def provision_lab5(base_dir, script_path):
     run_cmd(["docker", "exec", "gpo-dc", "sh", "-c", f"cat > {gpo_path}/Groups.xml << 'EOF'\n{groups_xml}\nEOF"], check=False)
     print_success("Authentic GPO Groups.xml injected with cpassword attribute")
     
- 
     print_info("Registering computer account ws-gpo-client$ in Active Directory...")
     run_cmd(["docker", "exec", "gpo-dc", "samba-tool", "computer", "create", "ws-gpo-client", "--configfile=/samba/etc/smb.conf"], check=False)
     run_cmd(["docker", "exec", "gpo-dc", "samba-tool", "user", "setpassword", "ws-gpo-client$", "--newpassword=GPOLabAdminPass2026!", "--configfile=/samba/etc/smb.conf"], check=False)
@@ -306,7 +327,6 @@ def provision_lab5(base_dir, script_path):
     print_info("Exporting computer keytab for ws-gpo-client$...")
     keytab_export = run_cmd(["docker", "exec", "gpo-dc", "samba-tool", "domain", "exportkeytab", "/tmp/ws-gpo-client.keytab", "--principal=ws-gpo-client$@GPOLAB.LOCAL", "--configfile=/samba/etc/smb.conf"], check=False)
     
-
     if keytab_export.returncode == 0:
         print_info("Copying keytab to gpo-client-sim container...")
         copy_result = run_cmd(["docker", "cp", "gpo-dc:/tmp/ws-gpo-client.keytab", "/tmp/ws-gpo-client.keytab"], check=False)
@@ -330,19 +350,20 @@ def provision_lab7(base_dir, script_path):
     run_cmd(["docker", "exec", "sql-dc", "python3", "/tmp/configure_sql.py"])
     run_cmd(["docker", "exec", "sql-dc", "samba-tool", "user", "setpassword", "Administrator", "--newpassword=SQLPivotAdminPass2026!", "--configfile=/samba/etc/smb.conf"])
     
-
     wait_for_postgres("sql-back")
     wait_for_postgres("sql-front")
     
- 
     run_cmd(["docker", "exec", "-u", "postgres", "sql-back", "psql", "-d", "postgres", "-c", "CREATE TABLE IF NOT EXISTS secret_flag (id SERIAL PRIMARY KEY, flag_val VARCHAR(100));"], check=False)
     run_cmd(["docker", "exec", "-u", "postgres", "sql-back", "psql", "-d", "postgres", "-c", "INSERT INTO secret_flag (flag_val) VALUES ('OSCP{sql_database_link_pivot_won}');"], check=False)
     
-
     run_cmd(["docker", "exec", "-u", "postgres", "sql-front", "psql", "-d", "postgres", "-c", "CREATE EXTENSION IF NOT EXISTS postgres_fdw;"], check=False)
     run_cmd(["docker", "exec", "-u", "postgres", "sql-front", "psql", "-d", "postgres", "-c", "CREATE SERVER IF NOT EXISTS sql_back_link FOREIGN DATA WRAPPER postgres_fdw OPTIONS (host '10.106.10.20', port '5432', dbname 'postgres');"], check=False)
     run_cmd(["docker", "exec", "-u", "postgres", "sql-front", "psql", "-d", "postgres", "-c", "CREATE USER MAPPING IF NOT EXISTS FOR postgres SERVER sql_back_link OPTIONS (user 'postgres', password 'SuperSecureBackPass2026!');"], check=False)
     run_cmd(["docker", "exec", "-u", "postgres", "sql-front", "psql", "-d", "postgres", "-c", "CREATE FOREIGN TABLE IF NOT EXISTS remote_flag (flag_val VARCHAR(100)) SERVER sql_back_link OPTIONS (schema_name 'public', table_name 'secret_flag');"], check=False)
+    
+    print_info("Applying anti-cheat network isolation rules to WireGuard gateway...")
+    run_cmd(["docker", "exec", "sql-wg-gateway", "iptables", "-A", "FORWARD", "-i", "wg0", "-d", "10.106.10.0/24", "-j", "DROP"], check=False)
+
 
 def provision_lab8(base_dir, script_path):
     print_header("Provisioning Lab 8 (laps-lab)")
@@ -350,7 +371,6 @@ def provision_lab8(base_dir, script_path):
     run_cmd(["docker", "exec", "laps-dc", "python3", "/tmp/configure_laps.py"])
     run_cmd(["docker", "exec", "laps-dc", "samba-tool", "user", "setpassword", "Administrator", "--newpassword=LAPSAdminPass2026!", "--configfile=/samba/etc/smb.conf"])
     
-   
     print_info("Exporting Domain Admin keytab from laps-dc...")
     run_cmd(["docker", "exec", "laps-dc", "samba-tool", "domain", "exportkeytab", "/tmp/admin.keytab", "--principal=Administrator@LAPSLAB.LOCAL", "--configfile=/samba/etc/smb.conf"], check=False)
     
@@ -360,7 +380,6 @@ def provision_lab8(base_dir, script_path):
     print_info("Copying ticket cache from laps-dc to host...")
     run_cmd(["docker", "cp", "laps-dc:/tmp/krb5cc_domain_admin", "/tmp/krb5cc_domain_admin"], check=False)
     
-
     print_info("Kerberos ticket cache available on host at /tmp/krb5cc_domain_admin")
 
 def provision_lab9(base_dir, script_path):
@@ -370,6 +389,7 @@ def provision_lab9(base_dir, script_path):
     run_cmd(["docker", "exec", "esc8-dc", "samba-tool", "user", "setpassword", "Administrator", "--newpassword=ESC8AdminPass2026!", "--configfile=/samba/etc/smb.conf"])
 
 def provision_lab10(base_dir, script_path):
+    print_header("Provisioning Lab 10 (delegation-s4u-lab)")
     run_cmd(["docker", "exec", "deleg-dc", "python3", "/tmp/configure_delegation.py"])
     run_cmd(["docker", "exec", "deleg-dc", "samba-tool", "user", "setpassword", "Administrator", "--newpassword=DelegationAdminPass2026!", "--configfile=/samba/etc/smb.conf"])
 
@@ -416,19 +436,61 @@ def modify_docker_compose(compose_path, host_ip, allocated_port, allocated_subne
     with open(compose_path, 'r', encoding='utf-8') as f:
         content = f.read()
     
-    
     content = re.sub(r'-\s*\d+:51820/udp', f'- {allocated_port}:51820/udp', content)
-    
-
     content = re.sub(r'-\s*SERVERPORT=\d+', f'- SERVERPORT={allocated_port}', content)
-
     content = re.sub(r'-\s*SERVERURL=[^\s\n]+', f'- SERVERURL={host_ip}', content)
-    
-
     content = re.sub(r'-\s*INTERNAL_SUBNET=10\.252\.\d+\.0/24', f'- INTERNAL_SUBNET={allocated_subnet}', content)
     
     with open(compose_path, 'w', encoding='utf-8') as f:
         f.write(content)
+
+def generate_vpn_profile(lab, base_dir):
+    print_header(f"Generating/Regenerating VPN Profile for {lab['dir']}")
+    compose_path = os.path.join(base_dir, lab["dir"], "docker-compose.yml")
+    if not os.path.exists(compose_path):
+        print_error(f"docker-compose.yml not found at {compose_path}")
+        return False
+        
+    with open(compose_path, 'r', encoding='utf-8') as f:
+        content = f.read()
+        
+    port_match = re.search(r'SERVERPORT=(\d+)', content)
+    subnet_match = re.search(r'INTERNAL_SUBNET=(10\.252\.\d+\.0/24)', content)
+    
+    if not port_match or not subnet_match:
+        print_error("Failed to parse existing SERVERPORT or INTERNAL_SUBNET from docker-compose.yml. Has the lab been deployed at least once?")
+        return False
+        
+    allocated_port = int(port_match.group(1))
+    allocated_subnet = subnet_match.group(1)
+    
+    subnet_prefix = allocated_subnet.split(".0/24")[0]
+    allocated_client_ip = f"{subnet_prefix}.2"
+    
+    host_ip = get_host_ip()
+    print_info(f"Using current Host IP: {host_ip}")
+    print_info(f"Using parsed WG Port: {allocated_port}")
+    print_info(f"Using parsed WG Subnet: {allocated_subnet} (Client IP: {allocated_client_ip})")
+    
+    content = re.sub(r'-\s*SERVERURL=[^\s\n]+', f'- SERVERURL={host_ip}', content)
+    with open(compose_path, 'w', encoding='utf-8') as f:
+        f.write(content)
+        
+    success = True
+    for wg_src_sub, wg_dest_name in lab["wg"]:
+        src_path = os.path.join(base_dir, lab["dir"], wg_src_sub, "peer1", "peer1.conf")
+        dest_path = os.path.join(base_dir, lab["dir"], wg_dest_name)
+        if not os.path.exists(src_path):
+            print_error(f"Source config file not found: {src_path}")
+            print_warning("Please deploy the lab first to generate the initial WireGuard keys and configuration files.")
+            success = False
+            continue
+        if process_wg_config(src_path, dest_path, host_ip, allocated_port, allocated_client_ip):
+            print_success(f"Successfully generated client VPN profile at: {dest_path}")
+        else:
+            success = False
+            
+    return success
 
 def stop_other_labs(current_lab, labs_def, base_dir):
     print_info("Checking for running labs to avoid port/resource conflicts...")
@@ -451,7 +513,6 @@ def stop_other_labs(current_lab, labs_def, base_dir):
                 
         if is_running:
             print_warning(f"Conflicting lab '{lab['dir']}' is running. Stopping and cleaning it...")
-       
             os.chdir(os.path.join(base_dir, lab["dir"]))
             subprocess.run(["docker", "compose", "down"], capture_output=True)
             os.chdir(base_dir)
@@ -510,10 +571,11 @@ def stop_central_dns():
 
 def start_timeout_daemon(lab, base_dir):
     print_info("Spawning auto-timeout background daemon...")
-    daemon_script = os.path.join(base_dir, "adlabs_daemon.py")
+    daemon_script = os.path.join(base_dir, "core", "adlabs_daemon.py")
     kwargs = {}
     if os.name == 'nt':
-        kwargs['creationflags'] = 0x00000008 | 0x00000200
+
+        kwargs['creationflags'] = 0x08000000 | 0x00000200
     else:
         kwargs['start_new_session'] = True
         
@@ -571,7 +633,6 @@ def deploy_lab(lab, base_dir, script_path, labs_def):
         process_wg_config(src_path, dest_path, host_ip, allocated_port, allocated_client_ip)
         
     start_timeout_daemon(lab, base_dir)
-    
     print_success(f"{lab['dir']} is fully deployed and provisioned.\n")
 
 def stop_lab(lab, base_dir):
@@ -589,24 +650,120 @@ def clean_lab(lab, base_dir):
     run_cmd(["docker", "compose", "down", "-v"])
     os.chdir(base_dir)
     print_success(f"Lab {lab['dir']} has been cleaned.")
+
+
+def check_container_status(container_name):
+    try:
+        res = subprocess.run(
+            ["docker", "inspect", "--format", "{{.State.Status}} {{if .State.Health}}{{.State.Health.Status}}{{else}}none{{end}}", container_name],
+            capture_output=True, text=True
+        )
+        if res.returncode != 0:
+            return "MISSING", "red"
+        
+        output = res.stdout.strip().split()
+        status = output[0] if len(output) > 0 else "unknown"
+        health = output[1] if len(output) > 1 else "none"
+
+        if status == "running":
+            if health == "healthy" or health == "none":
+                return "RUNNING", "green"
+            elif health == "starting":
+                return "STARTING", "yellow"
+            else:
+                return f"UNHEALTHY ({health})", "red"
+        else:
+            return f"STOPPED ({status})", "red"
+    except Exception:
+        return "UNKNOWN", "red"
+
+def test_port(ip, port, timeout=2):
+    try:
+        s = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+        s.settimeout(timeout)
+        s.connect((ip, port))
+        s.close()
+        return True
+    except Exception:
+        return False
+
+def test_lab_connectivity(lab):
+    wg_container = lab["wg_container"]
+    actual_port = lab['vpn_port']
+    if wg_container:
+        res_port = subprocess.run(["docker", "port", wg_container, "51820/udp"], capture_output=True, text=True)
+        if res_port.returncode == 0 and res_port.stdout.strip():
+            actual_port = res_port.stdout.strip().split(":")[-1] + "/UDP"
+
+    print(f"\n{BOLD}{CYAN}------------------------------------------------------{RESET}")
+    print(f"{BOLD}🧪 Lab {lab['index']}: {lab['dir']}{RESET}")
+    print(f"   🔑 WG Port: {actual_port} | Profile: {lab['vpn_profile']}")
+    print(f"{BOLD}{CYAN}------------------------------------------------------{RESET}")
+    
+    print(f"{BOLD}[*] Docker Container Status:{RESET}")
+    all_containers_running = True
+    for container in lab["containers"]:
+        status, color_name = check_container_status(container)
+        color = GREEN if color_name == "green" else (YELLOW if color_name == "yellow" else RED)
+        print(f"  - {container:<25}: {color}{status}{RESET}")
+        if status != "RUNNING" and "UNHEALTHY" in status:
+            all_containers_running = False
+        elif status == "MISSING" or "STOPPED" in status:
+            all_containers_running = False
+
+    if not all_containers_running:
+        print(f"  {YELLOW}⚠️  Note: Some containers are not running. Please start this lab first via:{RESET}")
+        print(f"  python adlabs.py --lab {lab['index']}")
+    
+    print(f"\n{BOLD}[*] VPN Socket Connectivity (Attacker Host -> Lab Services):{RESET}")
+    for target in lab["targets"]:
+        success = test_port(target["ip"], target["port"])
+        if success:
+            print(f"  [+] {target['name']:<40} ({target['ip']}:{target['port']}): {GREEN}SUCCESS (Connected!){RESET}")
+        else:
+            print(f"  [-] {target['name']:<40} ({target['ip']}:{target['port']}): {RED}FAILED (Unreachable){RESET}")
+            
+    print(f"  {YELLOW}ℹ️  Note: For pivoting labs, internal targets are expected to be FAILED (Unreachable) directly from your host. You must pivot through a compromised foothold container.{RESET}")
+    print(f"  {YELLOW}ℹ️  If connection failed, make sure your WireGuard Client is connected to '{lab['vpn_profile']}'{RESET}")
+
+def run_wordlist_generation(base_dir):
+    print_header("Generating / Recreating Wordlists for all labs")
+    wordlist_script = os.path.join(base_dir, "core", "generate_wordlists.py")
+    try:
+        res = subprocess.run([sys.executable, wordlist_script], capture_output=True, text=True)
+        if res.returncode == 0:
+            print(res.stdout.strip())
+            print_success("Wordlists generated successfully!")
+        else:
+            print_error(f"Failed to generate wordlists: {res.stderr.strip()}")
+    except Exception as e:
+        print_error(f"Exception raised while running wordlist generator: {e}")
+
+
 def show_banner():
     banner = f"""{CYAN}{BOLD}
-------------------------------------------------------
- █████╗ ██████╗ ██╗      █████╗ ██████╗ ███████╗
-██╔══██╗██╔══██╗██║     ██╔══██╗██╔══██╗██╔════╝
-███████║██║  ██║██║     ███████║██████╔╝███████╗
-██╔══██║██║  ██║██║     ██╔══██║██╔══██╗╚════██║
-██║  ██║██████╔╝███████╗██║  ██║██████╔╝███████║
-╚═╝  ╚═╝╚═════╝ ╚══════╝╚═╝  ╚═╝╚═════╝ ╚══════╝
-{RESET}{BLUE} Active Directory Pentesting Lab Suite Manager{RESET}
-{CYAN}------------------------------------------------------{RESET}"""
+ ------------------------------------------------------
+  █████╗ ██████╗ ██╗      █████╗ ██████╗ ███████╗
+ ██╔══██╗██╔══██╗██║     ██╔══██╗██╔══██╗██╔════╝
+ ███████║██║  ██║██║     ███████║██████╔╝███████╗
+ ██╔══██║██║  ██║██║     ██╔══██║██╔══██╗╚════██║
+ ██║  ██║██████╔╝███████╗██║  ██║██████╔╝███████║
+ ╚═╝  ╚═╝╚═════╝ ╚══════╝╚═╝  ╚═╝╚═════╝ ╚══════╝
+{RESET}{BLUE}  Active Directory Pentesting Lab Suite Manager{RESET}
+{CYAN} ------------------------------------------------------{RESET}"""
     print(banner)
 
-def main():
-    base_dir = os.getcwd()
-    script_path = os.path.join(base_dir, "configure_ad.py")
 
-    labs_def = [
+def start_web_ui():
+    print_info("Starting Web UI Dashboard on http://127.0.0.1:8000 ...")
+    base_dir = os.getcwd()
+    app_path = os.path.join(base_dir, "web", "app.py")
+    try:
+        subprocess.run([sys.executable, app_path], cwd=base_dir)
+    except KeyboardInterrupt:
+        print_info("Web UI Dashboard stopped.")
+
+labs_def = [
         {
             "index": 1,
             "dir": "oscp-network-pivot-lab",
@@ -616,7 +773,16 @@ def main():
             "dns_domains": ["megacorp.local", "hq.megacorp.local"],
             "dns_mappings": {"megacorp.local": "10.100.10.10", "hq.megacorp.local": "10.100.10.20"},
             "dns_networks": ["ad-forest-net"],
-            "prov_fn": provision_lab1
+            "prov_fn": provision_lab1,
+            "vpn_port": "51820/UDP",
+            "vpn_profile": "oscp-pivot-lab.conf",
+            "containers": ["perimeter-nginx-ui", "internal-postgres-db", "ad-forest-parent", "ad-forest-child"],
+            "targets": [
+                {"name": "Perimeter Web UI", "ip": "10.10.10.80", "port": 80, "protocol": "TCP"},
+                {"name": "Postgres Database", "ip": "10.20.20.20", "port": 5432, "protocol": "TCP"},
+                {"name": "Parent Domain Controller (MEGACORP.LOCAL)", "ip": "10.100.10.10", "port": 445, "protocol": "TCP"},
+                {"name": "Child Domain Controller (HQ.MEGACORP.LOCAL)", "ip": "10.100.20.10", "port": 389, "protocol": "TCP"}
+            ]
         },
         {
             "index": 2,
@@ -627,7 +793,15 @@ def main():
             "dns_domains": ["megacorp.local", "hq.megacorp.local", "cybertech.local"],
             "dns_mappings": {"megacorp.local": "10.101.10.10", "hq.megacorp.local": "10.101.20.10", "cybertech.local": "10.101.30.10"},
             "dns_networks": ["parent-net", "child-net", "tree-net"],
-            "prov_fn": provision_lab2
+            "prov_fn": provision_lab2,
+            "vpn_port": "51821/UDP",
+            "vpn_profile": "multi-domain-forest-lab.conf",
+            "containers": ["mega-dc-parent", "mega-dc-child", "mega-dc-tree"],
+            "targets": [
+                {"name": "Parent DC (MEGACORP.LOCAL)", "ip": "10.101.10.10", "port": 445, "protocol": "TCP"},
+                {"name": "Child DC (HQ.MEGACORP.LOCAL)", "ip": "10.101.20.10", "port": 389, "protocol": "TCP"},
+                {"name": "Tree DC (CYBERTECH.LOCAL)", "ip": "10.101.30.10", "port": 88, "protocol": "TCP"}
+            ]
         },
         {
             "index": 3,
@@ -638,7 +812,14 @@ def main():
             "dns_domains": ["adcslab.local"],
             "dns_mappings": {"adcslab.local": "10.102.10.10"},
             "dns_networks": ["ad-net"],
-            "prov_fn": provision_lab3
+            "prov_fn": provision_lab3,
+            "vpn_port": "51822/UDP",
+            "vpn_profile": "oscp-adcs-lab.conf",
+            "containers": ["adcs-dc", "adcs-ca-mock"],
+            "targets": [
+                {"name": "Domain Controller (ADCSLAB.LOCAL)", "ip": "10.102.10.10", "port": 445, "protocol": "TCP"},
+                {"name": "CA Mock Enrollment Web", "ip": "10.102.20.20", "port": 80, "protocol": "TCP"}
+            ]
         },
         {
             "index": 4,
@@ -649,7 +830,15 @@ def main():
             "dns_domains": ["foresta.local", "forestb.local"],
             "dns_mappings": {"foresta.local": "10.103.10.10", "forestb.local": "10.103.20.10"},
             "dns_networks": ["foresta-net", "forestb-net"],
-            "prov_fn": provision_lab4
+            "prov_fn": provision_lab4,
+            "vpn_port": "51823/UDP",
+            "vpn_profile": "oscp-trust-lab.conf",
+            "containers": ["dc-foresta", "dc-forestb", "trust-winrm-target"],
+            "targets": [
+                {"name": "Forest A DC (FORESTA.LOCAL)", "ip": "10.103.10.10", "port": 445, "protocol": "TCP"},
+                {"name": "Forest B DC (FORESTB.LOCAL)", "ip": "10.103.20.10", "port": 389, "protocol": "TCP"},
+                {"name": "WinRM Target Machine", "ip": "10.103.20.20", "port": 5985, "protocol": "TCP"}
+            ]
         },
         {
             "index": 5,
@@ -660,7 +849,13 @@ def main():
             "dns_domains": ["gpolab.local"],
             "dns_mappings": {"gpolab.local": "10.104.10.10"},
             "dns_networks": ["ad-net"],
-            "prov_fn": provision_lab5
+            "prov_fn": provision_lab5,
+            "vpn_port": "51824/UDP",
+            "vpn_profile": "oscp-gpo-lab.conf",
+            "containers": ["gpo-dc", "gpo-client-sim"],
+            "targets": [
+                {"name": "Domain Controller (GPOLAB.LOCAL)", "ip": "10.104.10.10", "port": 445, "protocol": "TCP"}
+            ]
         },
         {
             "index": 6,
@@ -671,7 +866,14 @@ def main():
             "dns_domains": ["rbcdlab.local"],
             "dns_mappings": {"rbcdlab.local": "10.105.10.10"},
             "dns_networks": ["ad-net"],
-            "prov_fn": provision_lab6
+            "prov_fn": provision_lab6,
+            "vpn_port": "51825/UDP",
+            "vpn_profile": "oscp-rbcd-lab.conf",
+            "containers": ["rbcd-dc", "rbcd-target-srv"],
+            "targets": [
+                {"name": "Domain Controller (RBCDLAB.LOCAL)", "ip": "10.105.10.10", "port": 445, "protocol": "TCP"},
+                {"name": "RBCD Target Server SSH", "ip": "10.105.20.20", "port": 22, "protocol": "TCP"}
+            ]
         },
         {
             "index": 7,
@@ -682,7 +884,15 @@ def main():
             "dns_domains": ["sqlpivot.local"],
             "dns_mappings": {"sqlpivot.local": "10.106.10.10"},
             "dns_networks": ["ad-net"],
-            "prov_fn": provision_lab7
+            "prov_fn": provision_lab7,
+            "vpn_port": "51826/UDP",
+            "vpn_profile": "oscp-sql-lab.conf",
+            "containers": ["sql-dc", "sql-front", "sql-back"],
+            "targets": [
+                {"name": "Domain Controller (SQLPIVOT.LOCAL)", "ip": "10.106.10.10", "port": 445, "protocol": "TCP"},
+                {"name": "Frontend Database (PostgreSQL)", "ip": "10.106.20.20", "port": 5432, "protocol": "TCP"},
+                {"name": "Backend Database (PostgreSQL)", "ip": "10.106.10.20", "port": 5432, "protocol": "TCP"}
+            ]
         },
         {
             "index": 8,
@@ -693,7 +903,14 @@ def main():
             "dns_domains": ["lapslab.local"],
             "dns_mappings": {"lapslab.local": "10.107.10.10"},
             "dns_networks": ["ad-net"],
-            "prov_fn": provision_lab8
+            "prov_fn": provision_lab8,
+            "vpn_port": "51827/UDP",
+            "vpn_profile": "oscp-laps-lab.conf",
+            "containers": ["laps-dc", "laps-finance-srv"],
+            "targets": [
+                {"name": "Domain Controller (LAPSLAB.LOCAL)", "ip": "10.107.10.10", "port": 445, "protocol": "TCP"},
+                {"name": "LAPS Target Server SSH", "ip": "10.107.20.20", "port": 22, "protocol": "TCP"}
+            ]
         },
         {
             "index": 9,
@@ -704,7 +921,14 @@ def main():
             "dns_domains": ["esc8lab.local"],
             "dns_mappings": {"esc8lab.local": "10.108.10.10"},
             "dns_networks": ["ad-net"],
-            "prov_fn": provision_lab9
+            "prov_fn": provision_lab9,
+            "vpn_port": "51828/UDP",
+            "vpn_profile": "oscp-esc8-lab.conf",
+            "containers": ["esc8-dc", "esc8-ca-web"],
+            "targets": [
+                {"name": "Domain Controller (ESC8LAB.LOCAL)", "ip": "10.108.10.10", "port": 445, "protocol": "TCP"},
+                {"name": "Web CA ADCS Enrollment", "ip": "10.108.20.20", "port": 80, "protocol": "TCP"}
+            ]
         },
         {
             "index": 10,
@@ -715,22 +939,42 @@ def main():
             "dns_domains": ["delegatelab.local"],
             "dns_mappings": {"delegatelab.local": "10.109.10.10"},
             "dns_networks": ["ad-net"],
-            "prov_fn": provision_lab10
+            "prov_fn": provision_lab10,
+            "vpn_port": "51829/UDP",
+            "vpn_profile": "oscp-delegation-lab.conf",
+            "containers": ["deleg-dc", "deleg-db"],
+            "targets": [
+                {"name": "Domain Controller (DELEGATELAB.LOCAL)", "ip": "10.109.10.10", "port": 445, "protocol": "TCP"},
+                {"name": "Database Server SSH", "ip": "10.109.20.20", "port": 22, "protocol": "TCP"}
+            ]
         }
     ]
 
-    parser = argparse.ArgumentParser(description="Manage AD Labs setup and provisioning.")
-    parser.add_argument("--all", action="store_true", help="Start and provision all 10 labs")
-    parser.add_argument("--lab", type=str, help="Start and provision a specific lab (by name or 1-10 index)")
+def main():
+    base_dir = os.getcwd()
+    script_path = os.path.join(base_dir, "core", "configure_ad.py")
+
+    parser = argparse.ArgumentParser(description="Manage AD Labs setup, provisioning, and connectivity.")
+    parser.add_argument("--all", "-a", action="store_true", help="Start and provision all 10 labs")
+    parser.add_argument("--lab", "-l", type=str, help="Start and provision a specific lab (by name or 1-10 index)")
     parser.add_argument("--stop-all", action="store_true", help="Stop all labs")
     parser.add_argument("--stop", type=str, help="Stop a specific lab (by name or 1-10 index)")
     parser.add_argument("--clean-all", action="store_true", help="Stop and remove volumes for all labs")
     parser.add_argument("--clean", type=str, help="Stop and remove volumes for a specific lab")
+    parser.add_argument("--test-all", action="store_true", help="Test connectivity & status of all labs")
+    parser.add_argument("--test", type=str, help="Test connectivity & status of a specific lab (by name or index)")
+    parser.add_argument("--generate-wordlists", action="store_true", help="Generate / Recreate users.txt and pass.txt wordlists for all labs")
+    parser.add_argument("--gen-vpn", type=str, help="Generate / Regenerate VPN profiles for a lab (or 'all' / index / name)")
+    parser.add_argument("--web", action="store_true", help="Start the Web UI Management Dashboard")
+
     
     args = parser.parse_args()
 
-  
-    has_args = any([args.all, args.lab, args.stop_all, args.stop, args.clean_all, args.clean])
+    has_args = any([
+        args.all, args.lab, args.stop_all, args.stop, 
+        args.clean_all, args.clean, args.test_all, args.test,
+        args.generate_wordlists, args.gen_vpn, args.web
+    ])
 
     if has_args:
         show_banner()
@@ -788,6 +1032,47 @@ def main():
             else:
                 print_error(f"Lab '{target}' not found.")
                 sys.exit(1)
+        elif args.test_all:
+            for lab in labs_def:
+                test_lab_connectivity(lab)
+        elif args.test:
+            target = args.test.strip()
+            matched = None
+            for lab in labs_def:
+                if target.isdigit() and int(target) == lab["index"]:
+                    matched = lab
+                    break
+                elif lab["dir"] == target:
+                    matched = lab
+                    break
+            if matched:
+                test_lab_connectivity(matched)
+            else:
+                print_error(f"Lab '{target}' not found.")
+                sys.exit(1)
+        elif args.generate_wordlists:
+            run_wordlist_generation(base_dir)
+        elif args.gen_vpn:
+            target = args.gen_vpn.strip()
+            if target.lower() == 'all':
+                for lab in labs_def:
+                    generate_vpn_profile(lab, base_dir)
+            else:
+                matched = None
+                for lab in labs_def:
+                    if target.isdigit() and int(target) == lab["index"]:
+                        matched = lab
+                        break
+                    elif lab["dir"] == target:
+                        matched = lab
+                        break
+                if matched:
+                    generate_vpn_profile(matched, base_dir)
+                else:
+                    print_error(f"Lab '{target}' not found.")
+                    sys.exit(1)
+        elif args.web:
+            start_web_ui()
         return
 
 
@@ -799,10 +1084,15 @@ def main():
         print(f" {YELLOW}⏸️ {RESET} {BOLD}[4]{RESET} Stop a specific active lab")
         print(f" {RED}🧹{RESET} {BOLD}[5]{RESET} Clean {BOLD}ALL{RESET} labs (Stop & Remove local docker volumes)")
         print(f" {RED}🗑️ {RESET} {BOLD}[6]{RESET} Clean a specific lab (Stop & Remove volumes)")
-        print(f" {BLUE}🚪{RESET} {BOLD}[7]{RESET} Exit")
-        print(f"{CYAN}------------------------------------------------------{RESET}")
+        print(f" {CYAN}🔍{RESET} {BOLD}[7]{RESET} Test Connectivity of {BOLD}ALL{RESET} labs")
+        print(f" {CYAN}📡{RESET} {BOLD}[8]{RESET} Test Connectivity of a specific lab")
+        print(f" {MAGENTA}📝{RESET} {BOLD}[9]{RESET} Generate / Recreate wordlists (users.txt & pass.txt) for all labs")
+        print(f" {CYAN}🔑{RESET} {BOLD}[10]{RESET} Generate / Regenerate VPN profiles (Update Host IP)")
+        print(f" {CYAN}🖥️{RESET}  {BOLD}[11]{RESET} Start Web UI Management Dashboard")
+        print(f" {BLUE}🚪{RESET} {BOLD}[12]{RESET} Exit")
+        print(f"{CYAN} ------------------------------------------------------{RESET}")
         
-        choice = input(f"{BOLD}Enter choice (1-7): {RESET}").strip()
+        choice = input(f"{BOLD}Enter choice (1-12): {RESET}").strip()
         
         if choice == "1":
             confirm = input(f"{YELLOW}{BOLD}[!] Are you sure you want to run all 10 labs? This requires significant RAM. (y/n): {RESET}").strip().lower()
@@ -867,6 +1157,51 @@ def main():
                 print_error("Invalid selection.")
             input(f"\nPress Enter to return to main menu...")
         elif choice == "7":
+            for lab in labs_def:
+                test_lab_connectivity(lab)
+            input(f"\nPress Enter to return to main menu...")
+        elif choice == "8":
+            print(f"\n{BOLD}{CYAN}--- Available Labs ---{RESET}")
+            for lab in labs_def:
+                print(f"  {BOLD}{lab['index']}){RESET} {lab['dir']}")
+            lab_choice = input(f"\n{BOLD}Enter lab index to test (1-{len(labs_def)}): {RESET}").strip()
+            matched = None
+            for lab in labs_def:
+                if lab_choice.isdigit() and int(lab_choice) == lab["index"]:
+                    matched = lab
+                    break
+            if matched:
+                test_lab_connectivity(matched)
+            else:
+                print_error("Invalid selection.")
+            input(f"\nPress Enter to return to main menu...")
+        elif choice == "9":
+            run_wordlist_generation(base_dir)
+            input(f"\nPress Enter to return to main menu...")
+        elif choice == "10":
+            print(f"\n{BOLD}{CYAN}--- Available Labs ---{RESET}")
+            print(f"  {BOLD}0){RESET} ALL Labs")
+            for lab in labs_def:
+                print(f"  {BOLD}{lab['index']}){RESET} {lab['dir']}")
+            lab_choice = input(f"\n{BOLD}Enter lab index to generate VPN for (0-{len(labs_def)}): {RESET}").strip()
+            if lab_choice == "0":
+                for lab in labs_def:
+                    generate_vpn_profile(lab, base_dir)
+            else:
+                matched = None
+                for lab in labs_def:
+                    if lab_choice.isdigit() and int(lab_choice) == lab["index"]:
+                        matched = lab
+                        break
+                if matched:
+                    generate_vpn_profile(matched, base_dir)
+                else:
+                    print_error("Invalid selection.")
+            input(f"\nPress Enter to return to main menu...")
+        elif choice == "11":
+            start_web_ui()
+            input(f"\nPress Enter to return to main menu...")
+        elif choice == "12":
             print_info("Exiting...")
             break
         else:

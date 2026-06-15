@@ -8,16 +8,16 @@ services:
       - PUID=1000
       - PGID=1000
       - TZ=Asia/Bangkok
-      - SERVERURL=127.0.0.1
-      - SERVERPORT=51827
+      - SERVERURL=192.168.1.157
+      - SERVERPORT=51820
       - PEERS=1
       - PEERDNS=10.107.10.10
-      - INTERNAL_SUBNET=10.252.8.0/24
+      - INTERNAL_SUBNET=10.252.1.0/24
       - ALLOWEDIPS=10.107.10.0/24,10.107.20.0/24
     volumes:
       - ./wireguard_laps:/config
     ports:
-      - 51827:51820/udp
+      - 51820:51820/udp
     networks:
       ad-net: { ipv4_address: 10.107.10.150 }
       srv-net: { ipv4_address: 10.107.20.150 }
