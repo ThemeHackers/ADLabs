@@ -3,6 +3,8 @@ import os
 import sys
 import time
 import argparse
+import socket
+import re
 
 
 BLUE = "\033[94m"
@@ -68,7 +70,7 @@ def wait_for_postgres(container_name, timeout=30):
     print_warning(f"Could not verify {container_name} readiness. Proceeding anyway...")
     return False
 
-def process_wg_config(src_path, dest_path):
+def process_wg_config(src_path, dest_path, host_ip, allocated_port, allocated_client_ip):
     print_info(f"Waiting for WG config file: {src_path} ...")
     for _ in range(60):
         if os.path.exists(src_path):
@@ -82,12 +84,18 @@ def process_wg_config(src_path, dest_path):
         lines = f.readlines()
     filtered = []
     for line in lines:
-        if "ListenPort" not in line:
+        if "ListenPort" in line:
+            continue
+        elif line.strip().startswith("Address"):
+            filtered.append(f"Address = {allocated_client_ip}\n")
+        elif line.strip().startswith("Endpoint"):
+            filtered.append(f"Endpoint = {host_ip}:{allocated_port}\n")
+        else:
             filtered.append(line)
             
     with open(dest_path, "w") as f:
         f.writelines(filtered)
-    print_success(f"Processed and wrote: {dest_path}")
+    print_success(f"Processed and wrote: {dest_path} (Endpoint={host_ip}:{allocated_port}, Address={allocated_client_ip})")
     return True
 
 def process_generated_creds(src_container, dest_dir):
@@ -362,41 +370,213 @@ def provision_lab9(base_dir, script_path):
     run_cmd(["docker", "exec", "esc8-dc", "samba-tool", "user", "setpassword", "Administrator", "--newpassword=ESC8AdminPass2026!", "--configfile=/samba/etc/smb.conf"])
 
 def provision_lab10(base_dir, script_path):
-    print_header("Provisioning Lab 10 (delegation-s4u-lab)")
-    run_cmd(["docker", "cp", "delegation-s4u-lab/configure_delegation.py", "deleg-dc:/tmp/configure_delegation.py"])
     run_cmd(["docker", "exec", "deleg-dc", "python3", "/tmp/configure_delegation.py"])
     run_cmd(["docker", "exec", "deleg-dc", "samba-tool", "user", "setpassword", "Administrator", "--newpassword=DelegationAdminPass2026!", "--configfile=/samba/etc/smb.conf"])
 
-def deploy_lab(lab, base_dir, script_path):
+def get_host_ip():
+    s = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
+    try:
+        s.connect(('8.8.8.8', 80))
+        ip = s.getsockname()[0]
+    except Exception:
+        ip = '127.0.0.1'
+    finally:
+        s.close()
+    return ip
+
+def get_free_udp_port(start_port=51820):
+    port = start_port
+    while True:
+        with socket.socket(socket.AF_INET, socket.SOCK_DGRAM) as s:
+            try:
+                s.bind(('0.0.0.0', port))
+                return port
+            except socket.error:
+                port += 1
+
+def get_free_subnet(start_x=1):
+    in_use = set()
+    res = subprocess.run(["docker", "network", "ls", "-q"], capture_output=True, text=True)
+    if res.returncode == 0:
+        ids = res.stdout.strip().split()
+        if ids:
+            inspect_res = subprocess.run(["docker", "network", "inspect"] + ids, capture_output=True, text=True)
+            if inspect_res.returncode == 0:
+                subnets = re.findall(r'"Subnet":\s*"([^"]+)"', inspect_res.stdout)
+                for sub in subnets:
+                    match = re.match(r'10\.252\.(\d+)\.', sub)
+                    if match:
+                        in_use.add(int(match.group(1)))
+    x = start_x
+    while x in in_use:
+        x += 1
+    return f"10.252.{x}.0/24", f"10.252.{x}.2"
+
+def modify_docker_compose(compose_path, host_ip, allocated_port, allocated_subnet):
+    with open(compose_path, 'r', encoding='utf-8') as f:
+        content = f.read()
+    
+    
+    content = re.sub(r'-\s*\d+:51820/udp', f'- {allocated_port}:51820/udp', content)
+    
+
+    content = re.sub(r'-\s*SERVERPORT=\d+', f'- SERVERPORT={allocated_port}', content)
+
+    content = re.sub(r'-\s*SERVERURL=[^\s\n]+', f'- SERVERURL={host_ip}', content)
+    
+
+    content = re.sub(r'-\s*INTERNAL_SUBNET=10\.252\.\d+\.0/24', f'- INTERNAL_SUBNET={allocated_subnet}', content)
+    
+    with open(compose_path, 'w', encoding='utf-8') as f:
+        f.write(content)
+
+def stop_other_labs(current_lab, labs_def, base_dir):
+    print_info("Checking for running labs to avoid port/resource conflicts...")
+    res = subprocess.run(["docker", "ps", "--filter", "label=com.docker.compose.project", "--format", "{{.Label \"com.docker.compose.project\"}}"], capture_output=True, text=True)
+    running_projects = set()
+    if res.returncode == 0:
+        running_projects = {p.strip().lower() for p in res.stdout.strip().split("\n") if p.strip()}
+        
+    for lab in labs_def:
+        if lab["dir"] == current_lab["dir"]:
+            continue
+        
+        is_running = False
+        if lab["dir"].lower() in running_projects:
+            is_running = True
+        else:
+            check_dc = subprocess.run(["docker", "inspect", "--format", "{{.State.Running}}", lab["dcs"][0]], capture_output=True, text=True)
+            if check_dc.returncode == 0 and check_dc.stdout.strip() == "true":
+                is_running = True
+                
+        if is_running:
+            print_warning(f"Conflicting lab '{lab['dir']}' is running. Stopping and cleaning it...")
+       
+            os.chdir(os.path.join(base_dir, lab["dir"]))
+            subprocess.run(["docker", "compose", "down"], capture_output=True)
+            os.chdir(base_dir)
+            print_success(f"Lab {lab['dir']} has stopped.")
+            time.sleep(2)
+
+def find_docker_network(lab_dir, net_name):
+    res = subprocess.run(["docker", "network", "ls", "--format", "{{.Name}}"], capture_output=True, text=True)
+    if res.returncode == 0:
+        networks = res.stdout.strip().split()
+        normalized_dir = lab_dir.lower().replace("-", "").replace("_", "").replace(".", "")
+        for net in networks:
+            normalized_net = net.lower().replace("-", "").replace("_", "").replace(".", "")
+            if normalized_dir in normalized_net and net_name.lower().replace("-", "").replace("_", "") in normalized_net:
+                return net
+    return f"{lab_dir}_{net_name}"
+
+def configure_central_dns(lab):
+    print_info("Configuring central DNS router container...")
+    subprocess.run(["docker", "stop", "adlabs-dns"], capture_output=True)
+    subprocess.run(["docker", "rm", "adlabs-dns"], capture_output=True)
+    
+    cmd = [
+        "docker", "run", "-d",
+        "--name", "adlabs-dns",
+        "-p", "53:53/udp",
+        "-p", "53:53/tcp",
+        "--restart", "always",
+        "andyshinn/dnsmasq:latest"
+    ]
+    
+    for domain, ip in lab["dns_mappings"].items():
+        cmd.extend(["--server", f"/{domain}/{ip}"])
+        
+    cmd.extend(["--server", "8.8.8.8"])
+    
+    res = subprocess.run(cmd, capture_output=True, text=True)
+    if res.returncode != 0:
+        print_warning(f"Failed to bind central DNS on port 53: {res.stderr.strip()}")
+        print_info("Attempting to run central DNS on fallback port 5353...")
+        cmd = [c if c != "53:53/udp" else "5353:53/udp" for c in cmd]
+        cmd = [c if c != "53:53/tcp" else "5353:53/tcp" for c in cmd]
+        subprocess.run(cmd, capture_output=True)
+    else:
+        print_success("Central DNS container (adlabs-dns) started on port 53.")
+        
+    for net_name in lab["dns_networks"]:
+        actual_net = find_docker_network(lab["dir"], net_name)
+        print_info(f"Connecting central DNS to network: {actual_net}")
+        subprocess.run(["docker", "network", "connect", actual_net, "adlabs-dns"], capture_output=True)
+
+def stop_central_dns():
+    print_info("Stopping central DNS router...")
+    subprocess.run(["docker", "stop", "adlabs-dns"], capture_output=True)
+    subprocess.run(["docker", "rm", "adlabs-dns"], capture_output=True)
+
+def start_timeout_daemon(lab, base_dir):
+    print_info("Spawning auto-timeout background daemon...")
+    daemon_script = os.path.join(base_dir, "adlabs_daemon.py")
+    kwargs = {}
+    if os.name == 'nt':
+        kwargs['creationflags'] = 0x00000008 | 0x00000200
+    else:
+        kwargs['start_new_session'] = True
+        
+    try:
+        subprocess.Popen(
+            [sys.executable, daemon_script,
+             "--lab-dir", os.path.join(base_dir, lab["dir"]),
+             "--wg-container", lab["wg_container"],
+             "--timeout", "7200",
+             "--idle-timeout", "900"],
+            stdout=subprocess.DEVNULL,
+            stderr=subprocess.DEVNULL,
+            close_fds=True,
+            **kwargs
+        )
+        print_success("Auto-timeout background daemon spawned successfully.")
+    except Exception as e:
+        print_error(f"Failed to spawn background daemon: {e}")
+
+def deploy_lab(lab, base_dir, script_path, labs_def):
     print(f"\n{BLUE}{BOLD}---------------------------------------------------{RESET}")
     print(f"{BLUE}{BOLD}🚀 Deploying & Provisioning: {lab['dir']}{RESET}")
     print(f"{BLUE}{BOLD}---------------------------------------------------{RESET}")
     
-
+    stop_other_labs(lab, labs_def, base_dir)
+    
+    host_ip = get_host_ip()
+    allocated_port = get_free_udp_port(51820)
+    allocated_subnet, allocated_client_ip = get_free_subnet(1)
+    
+    print_info(f"Dynamically allocated host IP: {host_ip}")
+    print_info(f"Dynamically allocated WG port: {allocated_port}")
+    print_info(f"Dynamically allocated WG subnet: {allocated_subnet} (Client IP: {allocated_client_ip})")
+    
+    compose_path = os.path.join(base_dir, lab["dir"], "docker-compose.yml")
+    modify_docker_compose(compose_path, host_ip, allocated_port, allocated_subnet)
+    
     os.chdir(os.path.join(base_dir, lab["dir"]))
     run_cmd(["docker", "compose", "up", "-d"])
     os.chdir(base_dir)
     
-  
     for dc in lab["dcs"]:
         wait_for_healthy(dc)
         
     print_info("Sleeping 5s for services stabilization...")
     time.sleep(5)
     
-
     lab["prov_fn"](base_dir, script_path)
     
- 
+    configure_central_dns(lab)
+    
     for wg_src_sub, wg_dest_name in lab["wg"]:
         src_path = os.path.join(base_dir, lab["dir"], wg_src_sub, "peer1", "peer1.conf")
         dest_path = os.path.join(base_dir, lab["dir"], wg_dest_name)
-        process_wg_config(src_path, dest_path)
+        process_wg_config(src_path, dest_path, host_ip, allocated_port, allocated_client_ip)
         
+    start_timeout_daemon(lab, base_dir)
+    
     print_success(f"{lab['dir']} is fully deployed and provisioned.\n")
 
 def stop_lab(lab, base_dir):
     print(f"\n{YELLOW}[*] Stopping lab: {lab['dir']}...{RESET}")
+    stop_central_dns()
     os.chdir(os.path.join(base_dir, lab["dir"]))
     run_cmd(["docker", "compose", "down"])
     os.chdir(base_dir)
@@ -404,11 +584,11 @@ def stop_lab(lab, base_dir):
 
 def clean_lab(lab, base_dir):
     print(f"\n{RED}[*] Cleaning (removing volumes) lab: {lab['dir']}...{RESET}")
+    stop_central_dns()
     os.chdir(os.path.join(base_dir, lab["dir"]))
     run_cmd(["docker", "compose", "down", "-v"])
     os.chdir(base_dir)
     print_success(f"Lab {lab['dir']} has been cleaned.")
-
 def show_banner():
     banner = f"""{CYAN}{BOLD}
 ------------------------------------------------------
@@ -432,6 +612,10 @@ def main():
             "dir": "oscp-network-pivot-lab",
             "dcs": ["ad-forest-parent", "ad-forest-child"],
             "wg": [("wireguard_oscp", "oscp-pivot-lab.conf")],
+            "wg_container": "oscp-wg-gateway",
+            "dns_domains": ["megacorp.local", "hq.megacorp.local"],
+            "dns_mappings": {"megacorp.local": "10.100.10.10", "hq.megacorp.local": "10.100.10.20"},
+            "dns_networks": ["ad-forest-net"],
             "prov_fn": provision_lab1
         },
         {
@@ -439,6 +623,10 @@ def main():
             "dir": "multi-domain-forest-lab",
             "dcs": ["mega-dc-parent", "mega-dc-child", "mega-dc-tree"],
             "wg": [("wireguard_forest", "multi-domain-forest-lab.conf")],
+            "wg_container": "mega-wg-gateway",
+            "dns_domains": ["megacorp.local", "hq.megacorp.local", "cybertech.local"],
+            "dns_mappings": {"megacorp.local": "10.101.10.10", "hq.megacorp.local": "10.101.20.10", "cybertech.local": "10.101.30.10"},
+            "dns_networks": ["parent-net", "child-net", "tree-net"],
             "prov_fn": provision_lab2
         },
         {
@@ -446,6 +634,10 @@ def main():
             "dir": "adcs-abuse-lab",
             "dcs": ["adcs-dc"],
             "wg": [("wireguard_adcs", "oscp-adcs-lab.conf")],
+            "wg_container": "adcs-wg-gateway",
+            "dns_domains": ["adcslab.local"],
+            "dns_mappings": {"adcslab.local": "10.102.10.10"},
+            "dns_networks": ["ad-net"],
             "prov_fn": provision_lab3
         },
         {
@@ -453,6 +645,10 @@ def main():
             "dir": "trust-pivoting-lab",
             "dcs": ["dc-foresta", "dc-forestb"],
             "wg": [("wireguard_trust", "oscp-trust-lab.conf")],
+            "wg_container": "trust-wg-gateway",
+            "dns_domains": ["foresta.local", "forestb.local"],
+            "dns_mappings": {"foresta.local": "10.103.10.10", "forestb.local": "10.103.20.10"},
+            "dns_networks": ["foresta-net", "forestb-net"],
             "prov_fn": provision_lab4
         },
         {
@@ -460,6 +656,10 @@ def main():
             "dir": "gpo-admin-pivot-lab",
             "dcs": ["gpo-dc"],
             "wg": [("wireguard_gpo", "oscp-gpo-lab.conf")],
+            "wg_container": "gpo-wg-gateway",
+            "dns_domains": ["gpolab.local"],
+            "dns_mappings": {"gpolab.local": "10.104.10.10"},
+            "dns_networks": ["ad-net"],
             "prov_fn": provision_lab5
         },
         {
@@ -467,6 +667,10 @@ def main():
             "dir": "rbcd-lab",
             "dcs": ["rbcd-dc"],
             "wg": [("wireguard_rbcd", "oscp-rbcd-lab.conf")],
+            "wg_container": "rbcd-wg-gateway",
+            "dns_domains": ["rbcdlab.local"],
+            "dns_mappings": {"rbcdlab.local": "10.105.10.10"},
+            "dns_networks": ["ad-net"],
             "prov_fn": provision_lab6
         },
         {
@@ -474,6 +678,10 @@ def main():
             "dir": "sql-pivot-lab",
             "dcs": ["sql-dc"],
             "wg": [("wireguard_sql", "oscp-sql-lab.conf")],
+            "wg_container": "sql-wg-gateway",
+            "dns_domains": ["sqlpivot.local"],
+            "dns_mappings": {"sqlpivot.local": "10.106.10.10"},
+            "dns_networks": ["ad-net"],
             "prov_fn": provision_lab7
         },
         {
@@ -481,6 +689,10 @@ def main():
             "dir": "laps-lab",
             "dcs": ["laps-dc"],
             "wg": [("wireguard_laps", "oscp-laps-lab.conf")],
+            "wg_container": "laps-wg-gateway",
+            "dns_domains": ["lapslab.local"],
+            "dns_mappings": {"lapslab.local": "10.107.10.10"},
+            "dns_networks": ["ad-net"],
             "prov_fn": provision_lab8
         },
         {
@@ -488,6 +700,10 @@ def main():
             "dir": "esc8-relay-lab",
             "dcs": ["esc8-dc"],
             "wg": [("wireguard_esc8", "oscp-esc8-lab.conf")],
+            "wg_container": "esc8-wg-gateway",
+            "dns_domains": ["esc8lab.local"],
+            "dns_mappings": {"esc8lab.local": "10.108.10.10"},
+            "dns_networks": ["ad-net"],
             "prov_fn": provision_lab9
         },
         {
@@ -495,6 +711,10 @@ def main():
             "dir": "delegation-s4u-lab",
             "dcs": ["deleg-dc"],
             "wg": [("wireguard_deleg", "oscp-delegation-lab.conf")],
+            "wg_container": "deleg-wg-gateway",
+            "dns_domains": ["delegatelab.local"],
+            "dns_mappings": {"delegatelab.local": "10.109.10.10"},
+            "dns_networks": ["ad-net"],
             "prov_fn": provision_lab10
         }
     ]
@@ -516,7 +736,7 @@ def main():
         show_banner()
         if args.all:
             for lab in labs_def:
-                deploy_lab(lab, base_dir, script_path)
+                deploy_lab(lab, base_dir, script_path, labs_def)
         elif args.lab:
             target = args.lab.strip()
             matched = None
@@ -528,7 +748,7 @@ def main():
                     matched = lab
                     break
             if matched:
-                deploy_lab(matched, base_dir, script_path)
+                deploy_lab(matched, base_dir, script_path, labs_def)
             else:
                 print_error(f"Lab '{target}' not found.")
                 sys.exit(1)
@@ -588,7 +808,7 @@ def main():
             confirm = input(f"{YELLOW}{BOLD}[!] Are you sure you want to run all 10 labs? This requires significant RAM. (y/n): {RESET}").strip().lower()
             if confirm == 'y':
                 for lab in labs_def:
-                    deploy_lab(lab, base_dir, script_path)
+                    deploy_lab(lab, base_dir, script_path, labs_def)
         elif choice == "2":
             print(f"\n{BOLD}{CYAN}--- Available Labs ---{RESET}")
             for lab in labs_def:
@@ -600,7 +820,7 @@ def main():
                     matched = lab
                     break
             if matched:
-                deploy_lab(matched, base_dir, script_path)
+                deploy_lab(matched, base_dir, script_path, labs_def)
             else:
                 print_error("Invalid selection.")
             input(f"\nPress Enter to return to main menu...")

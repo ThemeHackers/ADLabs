@@ -197,9 +197,37 @@ def main():
             sys.exit(1)
 
     for lab in selected_labs:
+        wg_container = None
+        if lab["index"] == 1:
+            wg_container = "oscp-wg-gateway"
+        elif lab["index"] == 2:
+            wg_container = "mega-wg-gateway"
+        elif lab["index"] == 3:
+            wg_container = "adcs-wg-gateway"
+        elif lab["index"] == 4:
+            wg_container = "trust-wg-gateway"
+        elif lab["index"] == 5:
+            wg_container = "gpo-wg-gateway"
+        elif lab["index"] == 6:
+            wg_container = "rbcd-wg-gateway"
+        elif lab["index"] == 7:
+            wg_container = "sql-wg-gateway"
+        elif lab["index"] == 8:
+            wg_container = "laps-wg-gateway"
+        elif lab["index"] == 9:
+            wg_container = "esc8-wg-gateway"
+        elif lab["index"] == 10:
+            wg_container = "deleg-wg-gateway"
+            
+        actual_port = lab['vpn_port']
+        if wg_container:
+            res_port = subprocess.run(["docker", "port", wg_container, "51820/udp"], capture_output=True, text=True)
+            if res_port.returncode == 0 and res_port.stdout.strip():
+                actual_port = res_port.stdout.strip().split(":")[-1] + "/UDP"
+
         print(f"\n{BOLD}{CYAN}------------------------------------------------------{RESET}")
         print(f"{BOLD}🧪 Lab {lab['index']}: {lab['name']}{RESET}")
-        print(f"   🔑 WG Port: {lab['vpn_port']} | Profile: {lab['vpn_profile']}")
+        print(f"   🔑 WG Port: {actual_port} | Profile: {lab['vpn_profile']}")
         print(f"{BOLD}{CYAN}------------------------------------------------------{RESET}")
         
       
