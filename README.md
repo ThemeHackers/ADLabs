@@ -4,6 +4,279 @@ This workspace contains ten lightweight, containerized Active Directory (AD) lab
 
 ---
 
+## ⚠️ IMPORTANT WARNINGS & SECURITY CONSIDERATIONS
+
+**READ THIS SECTION BEFORE PROCEEDING**
+
+- **Educational Purpose Only**: These labs are designed for authorized security training and educational purposes. Never use these techniques against systems without explicit permission.
+- **Isolated Environment**: All labs run in isolated Docker networks with WireGuard VPN access. Ensure your host firewall is configured appropriately.
+- **Credential Security**: Default credentials are provided for lab setup only. Do not reuse these passwords in production environments.
+- **Resource Usage**: Each lab consumes significant system resources (CPU, RAM, Disk). Ensure your system meets the requirements below.
+- **Network Isolation**: Labs use custom subnet ranges (10.x.x.x) that may conflict with existing VPN connections. Disconnect other VPNs before starting.
+- **Data Persistence**: Lab data persists in Docker volumes. Use the cleanup commands to completely remove lab data when finished.
+- **Auto-Timeout**: Labs automatically shut down after 2 hours of runtime or 15 minutes of idle activity to prevent resource exhaustion.
+
+---
+
+## 📋 Prerequisites
+
+Before using these labs, ensure you have the following installed:
+
+### Required Software
+- **Docker Engine**: Version 20.10 or higher
+- **Docker Compose**: Version 2.0 or higher
+- **Python 3**: Version 3.8 or higher (for the management script)
+- **WireGuard**: Client software for VPN connection
+  - **Windows**: [WireGuard for Windows](https://www.wireguard.com/install/)
+  - **Linux**: `sudo apt install wireguard` or `sudo yum install wireguard-tools`
+  - **macOS**: [WireGuard for macOS](https://apps.apple.com/app/wireguard/id1451685025)
+
+### System Requirements
+- **RAM**: Minimum 8GB (16GB recommended for running multiple labs)
+- **Disk Space**: Minimum 20GB free space
+- **CPU**: 4 cores minimum (8 cores recommended)
+- **Network**: Stable internet connection for pulling Docker images
+
+### Optional Tools for Pentesting
+- **Impacket**: For AD protocol manipulation
+- **BloodHound**: For AD relationship mapping
+- **CrackMapExec**: For AD authentication testing
+- **Rubeus**: For Kerberos attacks (Windows)
+- **Certipy**: For AD CS abuse
+- **nmap**: For network enumeration
+
+---
+
+## 🚀 Quick Start Guide
+
+### Option 1: Web Dashboard (Recommended)
+
+1. Start the web dashboard:
+   ```bash
+   python web/app.py
+   ```
+
+2. Open your browser to `http://127.0.0.1:8000`
+
+3. Use the dashboard to:
+   - View all lab statuses
+   - Deploy/stop/clean labs
+   - Generate VPN profiles
+   - Download WireGuard configurations
+
+### Option 2: Command Line Interface
+
+1. **Deploy a specific lab** (e.g., Lab 1):
+   ```bash
+   python adlabs.py --lab 1
+   ```
+
+2. **Generate VPN profile** (after lab is running):
+   ```bash
+   python adlabs.py --gen-vpn 1
+   ```
+
+3. **Connect using WireGuard**:
+   - Import the generated `.conf` file into WireGuard client
+   - Activate the connection
+   - You can now access lab targets at their assigned IPs
+
+4. **Stop a lab**:
+   ```bash
+   python adlabs.py --stop 1
+   ```
+
+5. **Clean up lab data** (removes all volumes):
+   ```bash
+   python adlabs.py --clean 1
+   ```
+
+### Useful Commands
+
+- **Stop all running labs**: `python adlabs.py --stop-all`
+- **Clean all labs**: `python adlabs.py --clean-all`
+- **Generate wordlists**: `python adlabs.py --generate-wordlists`
+- **Test lab connectivity**: `python adlabs.py --test 1`
+
+---
+
+## 🔌 Connection Instructions
+
+### WireGuard VPN Setup
+
+Each lab uses a dedicated WireGuard VPN gateway for secure access. Follow these steps:
+
+1. **Deploy the lab** using the web dashboard or CLI
+2. **Generate the VPN profile**:
+   - Via dashboard: Click "Generate VPN" button for the lab
+   - Via CLI: `python adlabs.py --gen-vpn <lab_number>`
+3. **Import the configuration**:
+   - The `.conf` file is located in the lab directory (e.g., `oscp-network-pivot-lab/oscp-pivot-lab.conf`)
+   - Open WireGuard client and import the file
+4. **Activate the connection**:
+   - Click "Activate" in WireGuard client
+   - The tunnel will establish and you'll receive a VPN IP (typically 10.252.x.2)
+5. **Access lab targets**:
+   - Use the target IPs listed in the table below
+   - DNS resolution is configured automatically for domain names
+
+### Connection Troubleshooting
+
+**Issue**: WireGuard handshake fails
+- **Solution**: Check that the host IP in the `.conf` file matches your current network interface IP. Regenerate the VPN profile if your IP changed.
+
+**Issue**: Cannot reach lab targets
+- **Solution**: Verify the WireGuard tunnel is active (check peer status). Ensure you're using the correct target IP addresses.
+
+**Issue**: Port conflicts
+- **Solution**: The script automatically allocates free UDP ports starting from 51820. If you have other WireGuard instances, stop them first.
+
+**Issue**: DNS resolution not working
+- **Solution**: The VPN profile includes DNS settings. If issues persist, try using IP addresses directly instead of hostnames.
+
+---
+
+## 🗂️ Lab Management
+
+### Lab Lifecycle
+
+1. **Deploy**: Creates and starts all containers for a lab
+2. **Provision**: Configures AD, users, and vulnerabilities (automatic during deploy)
+3. **Connect**: Generate VPN profile and connect via WireGuard
+4. **Practice**: Perform penetration testing exercises
+5. **Stop**: Stops all containers (preserves data in volumes)
+6. **Clean**: Removes containers and volumes (complete data removal)
+
+### Best Practices
+
+- **One Lab at a Time**: Only run one lab at a time to avoid resource conflicts
+- **Regular Cleanup**: Use `--clean` when finished with a lab to free disk space
+- **Backup Configs**: Save your VPN profiles if you need to reconnect later
+- **Document Progress**: Take notes on techniques used for each lab
+- **Check Resources**: Monitor Docker resource usage with `docker stats`
+
+---
+
+## 🛠️ Troubleshooting
+
+### Common Issues
+
+**Docker containers won't start**
+- Check Docker is running: `docker ps`
+- Verify sufficient disk space: `docker system df`
+- Check port conflicts: `netstat -tuln | grep 5182`
+- Restart Docker daemon if needed
+
+**Lab deployment fails**
+- Ensure you're in the project root directory
+- Check Python dependencies: `pip install -r requirements.txt` (if available)
+- Verify Docker Compose version: `docker compose version`
+- Check logs: `docker compose logs` in the lab directory
+
+**WireGuard connection issues**
+- Regenerate VPN profile after IP changes: `python adlabs.py --gen-vpn <lab>`
+- Verify firewall allows UDP traffic on the assigned port
+- Check WireGuard client logs for handshake errors
+- Try using IP addresses instead of hostnames
+
+**AD authentication failures**
+- Verify you're connected to the VPN
+- Check DNS resolution: `nslookup <dc_ip>`
+- Use correct domain format: `DOMAIN.LOCAL`
+- Verify credentials from the lab's credentials.txt file
+
+**Container health checks failing**
+- Wait 2-3 minutes after deployment for services to stabilize
+- Check container logs: `docker logs <container_name>`
+- Restart specific containers: `docker restart <container_name>`
+- Use `--test` command to verify connectivity
+
+### Getting Help
+
+- Check container logs: `docker logs <container_name>`
+- View all containers: `docker ps -a`
+- Inspect networks: `docker network ls`
+- Check resource usage: `docker stats`
+- Review the lab-specific README files in each directory
+
+---
+
+## 🧹 Cleanup & Maintenance
+
+### Remove a Single Lab
+```bash
+python adlabs.py --clean <lab_number>
+```
+This removes all containers, networks, and volumes for the specified lab.
+
+### Remove All Labs
+```bash
+python adlabs.py --clean-all
+```
+This completely removes all lab data from your system.
+
+### Docker System Cleanup
+```bash
+# Remove unused images
+docker image prune -a
+
+# Remove unused volumes
+docker volume prune
+
+# Remove unused networks
+docker network prune
+
+# Complete system cleanup (use with caution)
+docker system prune -a --volumes
+```
+
+### Reset a Lab
+If you need to reset a lab to its initial state:
+1. Stop the lab: `python adlabs.py --stop <lab_number>`
+2. Clean the lab: `python adlabs.py --clean <lab_number>`
+3. Deploy again: `python adlabs.py --lab <lab_number>`
+
+---
+
+## 💡 Tips for Success
+
+### Enumeration Strategy
+1. **Start with network scanning**: Use `nmap` to discover all hosts and open ports
+2. **Identify domain controllers**: Look for ports 88 (Kerberos), 389 (LDAP), 445 (SMB)
+3. **Enumerate users**: Use tools like `ldapsearch`, `crackmapexec`, or BloodHound
+4. **Check for vulnerabilities**: Look for AS-REP roasting, Kerberoasting, delegation misconfigurations
+5. **Document findings**: Keep track of credentials, SPNs, and interesting permissions
+
+### Common Attack Paths
+- **AS-REP Roasting**: Target users with `UF_DONT_REQUIRE_PREAUTH` set
+- **Kerberoasting**: Request service tickets for SPN-enabled accounts and crack offline
+- **Password Spraying**: Try common passwords across multiple accounts
+- **Delegation Abuse**: Exploit unconstrained or constrained delegation
+- **Certificate Abuse**: Leverage AD CS misconfigurations (ESC1-ESC8)
+- **LAPS**: Extract local admin passwords from AD attributes
+- **GPO Abuse**: Modify Group Policy scripts for code execution
+- **Trust Abuse**: Pivot across domain and forest trusts
+
+### Useful Commands
+```bash
+# Check VPN connectivity
+ping 10.252.x.2
+
+# Enumerate AD users
+crackmapexec smb <dc_ip> -u '' -p '' --users
+
+# AS-REP roasting
+GetNPUsers.py <domain>/ -usersfile users.txt -outputfile hashes.asrep
+
+# Kerberoasting
+GetUserSPNs.py <domain>/<user>:<password> -outputfile hashes.kerberoast
+
+# BloodHound enumeration
+python bloodhound-python -d <domain> -u <user> -p <password> -ns <dc_ip> -c All
+```
+
+---
+
 ## 1. Labs Architecture & Network Mapping
 
 To prevent port conflicts on the host, each lab operates on isolated subnet spaces and maps its WireGuard VPN gateway to a distinct host UDP port.
@@ -208,196 +481,3 @@ These labs are designed to simulate real-world enterprise penetration testing as
   * Flag located on the database server.
 
 ---
----
-
-## 3. How to Connect via WireGuard
-
-1. Install the **WireGuard Client** on your attacking machine (Windows or Kali Linux).
-2. Import the individual `.conf` configuration profile of the lab you want to target, or import the pre-packaged **`ADLabs-WireGuard.zip`** file directly into the WireGuard Client to load all 10 lab profiles at once.
-3. Activate the tunnel.
-4. Target the containers directly via their `10.x.x.x` IPs.
-
-> [!WARNING]
-> Only activate **one lab tunnel at a time** in your WireGuard Client to prevent routing and DNS resolution conflicts on your host.
-
-### Connecting directly inside WSL2 (Ubuntu)
-If you prefer to connect to the WireGuard VPN directly inside your WSL2 Ubuntu terminal, follow these steps:
-
-1. Install WireGuard and resolvconf:
-   ```bash
-   sudo apt update && sudo apt install -y wireguard resolvconf
-   ```
-2. Copy the desired lab configuration file (e.g., for Lab 8):
-   ```bash
-   sudo cp /mnt/c/Users/<YOUR_USERNAME>/Downloads/ADLabs/laps-lab/oscp-laps-lab.conf /etc/wireguard/wg0.conf
-   ```
-   Replace `<YOUR_USERNAME>` with your actual Windows username.
-3. Start the VPN connection:
-   ```bash
-   sudo wg-quick up wg0
-   ```
-4. Stop the VPN connection when finished:
-   ```bash
-   sudo wg-quick down wg0
-   ```
-
----
-
-## 4. How to Manage & Provision Labs
-
-You can manage labs using either the **Web Dashboard** (recommended) or the **CLI script**. All core utility scripts are located in the `core/` folder.
-
-### Web Dashboard (Recommended)
-
-A modern web-based management interface is available for easier lab management:
-
-#### Starting the Web Dashboard
-```bash
-python web/app.py
-```
-
-The dashboard will be available at `http://127.0.0.1:8000`
-
-#### Web Dashboard Features
-- **Real-time Lab Status**: View running status of all 10 labs with container health indicators
-- **Deploy Labs**: Start individual labs or all labs with one click
-- **Stop Labs**: Stop individual labs or all running labs
-- **Clean Labs**: Remove lab containers and volumes to reset state
-- **Test Connectivity**: Verify network connectivity and container health
-- **VPN Profile Management**: Download WireGuard configuration files directly from the interface
-- **Global Actions**: Stop all labs, clean all labs, rebuild wordlists
-- **Live Execution Log**: View real-time command output during operations
-
-#### Web Dashboard Requirements
-- Python 3.7+
-- Flask (`pip install flask`)
-- Docker running on the host
-
----
-
-### CLI Management Script
-
-You can also use the unified management script **`adlabs.py`** to start, stop, clean up, provision, test connectivity, and generate wordlists for all labs.
-
-#### Interactive Mode (Recommended)
-Simply run the script without any arguments to open the interactive CLI manager menu:
-```bash
-python adlabs.py
-```
-This menu allows you to:
-- Deploy and provision all 10 labs at once.
-- **Select a specific lab to deploy and provision** (highly recommended if you have limited RAM/CPU resources).
-- Stop all or specific active labs.
-- Clean up all or specific labs (stops containers and deletes local database/AD state volumes).
-- Test connectivity and container health of all or specific labs.
-- Generate and recreate wordlists (`users.txt` and `pass.txt`) for brute-forcing practice.
-
-#### Non-Interactive Command-Line Mode
-You can also automate lab management by passing flags:
-* **Deploy All Labs**: `python adlabs.py --all` (or `-a`)
-* **Deploy a Specific Lab**: `python adlabs.py --lab <index_or_name>` (or `-l <index_or_name>`, e.g., `python adlabs.py --lab 8` or `python adlabs.py --lab laps-lab`)
-* **Stop All Labs**: `python adlabs.py --stop-all`
-* **Stop a Specific Lab**: `python adlabs.py --stop <index_or_name>`
-* **Clean All Labs (Stops & Removes volumes)**: `python adlabs.py --clean-all`
-* **Clean a Specific Lab**: `python adlabs.py --clean <index_or_name>`
-* **Test All Labs Connectivity**: `python adlabs.py --test-all`
-* **Test a Specific Lab Connectivity**: `python adlabs.py --test <index_or_name>`
-* **Generate Wordlists**: `python adlabs.py --generate-wordlists`
-
----
-
-## 5. Project Structure
-
-```
-ADLabs/
-├── adlabs.py                 # Main CLI management script
-├── web/                      # Web dashboard interface
-│   ├── app.py               # Flask application
-│   ├── static/              # CSS and JavaScript files
-│   │   ├── style.css       # Dashboard styles
-│   │   └── dashboard.js    # Dashboard logic
-│   └── templates/          # HTML templates
-│       └── index.html      # Main dashboard page
-├── core/                     # Core utility scripts
-│   ├── adlabs_daemon.py    # Background daemon for lab operations
-│   ├── configure_ad.py     # AD domain configuration
-│   ├── generate_wordlists.py  # Wordlist generation
-│   └── uac.py              # UAC bypass utilities
-├── oscp-network-pivot-lab/   # Lab 1: Network Pivoting
-├── multi-domain-forest-lab/  # Lab 2: Multi-Domain Forest
-├── adcs-abuse-lab/           # Lab 3: AD CS Certificate Abuse
-├── trust-pivoting-lab/       # Lab 4: Trust & Forest Pivoting
-├── gpo-admin-pivot-lab/      # Lab 5: GPO & Client Workstation Pivot
-├── rbcd-lab/                 # Lab 6: Resource-Based Constrained Delegation
-├── sql-pivot-lab/            # Lab 7: SQL Database Link Pivoting
-├── laps-lab/                 # Lab 8: LAPS & Local Admin Password Leak
-├── esc8-relay-lab/           # Lab 9: AD CS NTLM Relay (ESC8)
-└── delegation-s4u-lab/       # Lab 10: Constrained Delegation (S4U)
-```
-
----
-
-## 6. Requirements
-
-### System Requirements
-- **Docker**: Version 20.10 or higher
-- **Docker Compose**: Version 2.0 or higher
-- **Python**: Version 3.7 or higher
-- **RAM**: Minimum 8GB (16GB+ recommended for running multiple labs)
-- **Disk Space**: Minimum 10GB free space
-
-### Python Dependencies
-```bash
-pip install flask
-```
-
-### Network Requirements
-- UDP ports 51820-51829 available on host (for WireGate VPN gateways)
-- No conflicting services on target subnets (10.x.x.x ranges)
-
----
-
-## 7. Troubleshooting
-
-### Common Issues
-
-**Lab containers fail to start**
-- Ensure Docker daemon is running: `docker ps`
-- Check for port conflicts on UDP ports 51820-51829
-- Verify sufficient RAM/CPU resources available
-
-**WireGuard connection fails**
-- Ensure only one lab tunnel is active at a time
-- Check that the correct .conf file is imported
-- Verify the lab containers are running before activating the tunnel
-
-**Web dashboard won't start**
-- Ensure Flask is installed: `pip install flask`
-- Check that port 8000 is not already in use
-- Verify Python 3.7+ is installed
-
-**Lab state persists after cleanup**
-- Use `--clean` instead of `--stop` to remove volumes
-- Manually remove volumes: `docker volume ls` and `docker volume rm <volume>`
-
-### Getting Help
-- Check individual lab directories for specific configuration files
-- Review container logs: `docker logs <container_name>`
-- Test connectivity: `python adlabs.py --test <lab_name>`
-
----
-
-## 8. License
-
-This project is intended for educational purposes and penetration testing practice. Use responsibly and only on systems you have authorization to test.
-
----
-
-## 9. Contributing
-
-Contributions are welcome! Please ensure:
-- All labs follow the established directory structure
-- Documentation is updated for any new features
-- Code follows Python best practices
-- Security implications are considered for any changes
-
