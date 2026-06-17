@@ -5,9 +5,9 @@ import string
 lab_credentials = {
     "oscp-network-pivot-lab": {"user": "j.smith", "pass": "CorpSecurePass2026!1"},
     "multi-domain-forest-lab": {"user": "j.doe", "pass": "CorpSecurePass2026!1"},
-    "adcs-abuse-lab": {"user": "adcs_user", "pass": "ADCSUserPass2026!"},
-    "trust-pivoting-lab": {"user": "student", "pass": "SimpleStudentPass2026!"},
-    "gpo-admin-pivot-lab": {"user": "operator", "pass": "OperatorPass2026!"},
+    "adcs-abuse-lab": {"user": "l3_j.doe", "pass": "StudentPass2026!"},
+    "trust-pivoting-lab": {"user": "l4b_student", "pass": "SimpleStudentPass2026!"},
+    "gpo-admin-pivot-lab": {"user": "l5_operator", "pass": "OperatorPass2026!"},
     "rbcd-lab": {"user": "l6_r.worker", "pass": "WorkerPass2026!"},
     "sql-pivot-lab": {"user": "l7_db_operator", "pass": "OperatorSecurePass2026!"},
     "laps-lab": {"user": "l8_audit_user", "pass": "AuditPass2026!"},

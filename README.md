@@ -53,8 +53,9 @@ Before using these labs, ensure you have the following installed:
 
 1. Start the web dashboard:
    ```bash
-   python web/app.py
+   python adlabs.py --web
    ```
+   *(Alternatively, you can run `python web/app.py` directly).*
 
 2. Open your browser to `http://127.0.0.1:8000`
 
@@ -64,7 +65,14 @@ Before using these labs, ensure you have the following installed:
    - Generate VPN profiles
    - Download WireGuard configurations
 
-### Option 2: Command Line Interface
+### Option 2: Interactive CLI Menu
+
+Simply run the script without any arguments to open the interactive command-line manager:
+```bash
+python adlabs.py
+```
+
+### Option 3: Command Line Interface (CLI Flags)
 
 1. **Deploy a specific lab** (e.g., Lab 1):
    ```bash
@@ -350,7 +358,8 @@ These labs are designed to simulate real-world enterprise penetration testing as
   3. Request a certificate using the vulnerable template while specifying a high-privileged administrator as the Subject Alternative Name (SAN).
   4. Perform Kerberos PKINIT authentication using the enrolled certificate to retrieve the administrator session ticket or NTLM credential.
 * **Starting Credentials**:
-  * Check the [credentials.txt](./adcs-abuse-lab/credentials.txt) file in the lab folder for your audit account credentials.
+  * User: `l3_j.doe`
+  * Password: `StudentPass2026!`
 * **Flag Targets**:
   * Domain Administrator authentication access.
 
@@ -458,7 +467,8 @@ These labs are designed to simulate real-world enterprise penetration testing as
   3. Coerce NTLM authentication from the Domain Controller back to your listener.
   4. Relay the connection to obtain a certificate for the Domain Controller account, and use the certificate to execute a DCSync attack.
 * **Starting Credentials**:
-  * User: `l9_student` (password provided in lab credentials)
+  * User: `l9_student`
+  * Password: `StudentPass2026!`
 * **Flag Targets**:
   * Extracted Domain Controller password hashes.
 

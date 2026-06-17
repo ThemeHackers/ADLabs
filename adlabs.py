@@ -192,6 +192,7 @@ def provision_lab3(base_dir, script_path):
     run_cmd(["docker", "cp", script_path, "adcs-dc:/tmp/configure_ad.py"])
     run_cmd(["docker", "exec", "adcs-dc", "python3", "/tmp/configure_ad.py", "--role", "parent", "--realm", "ADCSLAB.LOCAL", "--user-prefix", "l3_"])
     run_cmd(["docker", "exec", "adcs-dc", "samba-tool", "user", "create", "l3_j.doe", "StudentPass2026!", "--realm=ADCSLAB.LOCAL", "--configfile=/samba/etc/smb.conf"], check=False)
+    run_cmd(["docker", "exec", "adcs-dc", "samba-tool", "user", "setpassword", "l3_j.doe", "--newpassword=StudentPass2026!", "--configfile=/samba/etc/smb.conf"], check=False)
     run_cmd(["docker", "exec", "adcs-dc", "samba-tool", "user", "setpassword", "Administrator", "--newpassword=ADCSLabAdminPass2026!", "--configfile=/samba/etc/smb.conf"])
     run_cmd(["docker", "exec", "adcs-dc", "mkdir", "-p", "/tmp/ca"])
 
