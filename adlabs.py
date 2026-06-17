@@ -778,10 +778,10 @@ labs_def = [
             "vpn_profile": "oscp-pivot-lab.conf",
             "containers": ["perimeter-nginx-ui", "internal-postgres-db", "ad-forest-parent", "ad-forest-child"],
             "targets": [
-                {"name": "Perimeter Web UI", "ip": "10.10.10.80", "port": 80, "protocol": "TCP"},
+                {"name": "Perimeter Web UI", "ip": "10.10.10.80", "port": 9000, "protocol": "TCP"},
                 {"name": "Postgres Database", "ip": "10.20.20.20", "port": 5432, "protocol": "TCP"},
                 {"name": "Parent Domain Controller (MEGACORP.LOCAL)", "ip": "10.100.10.10", "port": 445, "protocol": "TCP"},
-                {"name": "Child Domain Controller (HQ.MEGACORP.LOCAL)", "ip": "10.100.20.10", "port": 389, "protocol": "TCP"}
+                {"name": "Child Domain Controller (HQ.MEGACORP.LOCAL)", "ip": "10.100.10.20", "port": 389, "protocol": "TCP"}
             ]
         },
         {
@@ -837,7 +837,7 @@ labs_def = [
             "targets": [
                 {"name": "Forest A DC (FORESTA.LOCAL)", "ip": "10.103.10.10", "port": 445, "protocol": "TCP"},
                 {"name": "Forest B DC (FORESTB.LOCAL)", "ip": "10.103.20.10", "port": 389, "protocol": "TCP"},
-                {"name": "WinRM Target Machine", "ip": "10.103.20.20", "port": 5985, "protocol": "TCP"}
+                {"name": "WinRM Target Machine", "ip": "10.103.20.30", "port": 5985, "protocol": "TCP"}
             ]
         },
         {

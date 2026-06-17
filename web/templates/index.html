@@ -168,6 +168,40 @@
         </div>
     </div>
 
+    <!-- Lab Terminal Modal -->
+    <div class="modal-overlay" id="lab-log-modal">
+        <div class="modal-card terminal-modal-card">
+            <div class="modal-header terminal-modal-header">
+                <div class="terminal-dots">
+                    <span class="dot dot-close" id="btn-close-lab-modal" title="Close Terminal"></span>
+                    <span class="dot dot-minimize"></span>
+                    <span class="dot dot-expand"></span>
+                </div>
+                <h3 id="lab-modal-title">Lab Terminal</h3>
+                <span class="lab-modal-status-badge status-stopped" id="lab-modal-status">Stopped</span>
+            </div>
+            <div class="terminal-toolbar">
+                <div class="toolbar-left">
+                    <span class="toolbar-info"><i data-lucide="terminal" style="width: 13px; height: 13px;"></i> sh / bash</span>
+                </div>
+                <div class="toolbar-right">
+                    <button class="toolbar-btn" id="btn-modal-copy-log" title="Copy Output">
+                        <i data-lucide="copy" style="width: 14px; height: 14px;"></i> <span>Copy</span>
+                    </button>
+                    <button class="toolbar-btn" id="btn-modal-autoscroll" title="Toggle Auto-scroll">
+                        <i data-lucide="chevrons-down" style="width: 14px; height: 14px;"></i> <span>Auto-scroll</span>
+                    </button>
+                    <button class="toolbar-btn" id="btn-modal-clear-log" title="Clear Terminal Log">
+                        <i data-lucide="trash-2" style="width: 14px; height: 14px;"></i> <span>Clear</span>
+                    </button>
+                </div>
+            </div>
+            <div class="modal-body terminal-modal-body" id="lab-log-body">
+                <!-- Log content goes here -->
+            </div>
+        </div>
+    </div>
+
     <!-- JavaScript Controller -->
     <script src="/static/dashboard.js?v=1.1.0"></script>
 </body>

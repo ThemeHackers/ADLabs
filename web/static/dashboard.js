@@ -10,10 +10,21 @@ document.addEventListener("DOMContentLoaded", () => {
     const btnCloseGlobalModal = document.getElementById("btn-close-global-modal");
     const btnCloseGlobalModalFooter = document.getElementById("btn-close-global-modal-footer");
     
+   
+    const labLogModal = document.getElementById("lab-log-modal");
+    const labLogBody = document.getElementById("lab-log-body");
+    const btnCloseLabModal = document.getElementById("btn-close-lab-modal");
+    const labModalTitle = document.getElementById("lab-modal-title");
+    const labModalStatus = document.getElementById("lab-modal-status");
+    const btnModalCopyLog = document.getElementById("btn-modal-copy-log");
+    const btnModalAutoscroll = document.getElementById("btn-modal-autoscroll");
+    const btnModalClearLog = document.getElementById("btn-modal-clear-log");
+    
     let eventSource = null;
     let labsDataCache = [];
     const activeLogs = {};
     const activeLogVisible = {};
+    const activeLogAutoscroll = {};
 
     lucide.createIcons();
 
@@ -171,8 +182,20 @@ document.addEventListener("DOMContentLoaded", () => {
 
                 <div class="lab-log-area">
                     <div class="lab-log-header">
-                        <span>Execution Log</span>
-                        <button class="btn-close-log" data-index="${lab.index}">&times;</button>
+                        <div class="terminal-dots">
+                            <span class="dot dot-close btn-close-log" data-index="${lab.index}" title="Close Log"></span>
+                            <span class="dot dot-minimize" title="Minimize"></span>
+                            <span class="dot dot-expand btn-maximize-log" data-index="${lab.index}" title="Maximize Log"></span>
+                        </div>
+                        <span class="terminal-title">Execution Log</span>
+                        <div class="terminal-actions">
+                            <button class="btn-log-action btn-copy-log" data-index="${lab.index}" title="Copy Logs">
+                                <i data-lucide="copy" style="width: 12px; height: 12px;"></i>
+                            </button>
+                            <button class="btn-log-action btn-autoscroll" data-index="${lab.index}" title="Toggle Auto-scroll">
+                                <i data-lucide="chevrons-down" style="width: 12px; height: 12px;"></i>
+                            </button>
+                        </div>
                     </div>
                     <div class="lab-log-body"></div>
                 </div>
@@ -216,7 +239,9 @@ document.addEventListener("DOMContentLoaded", () => {
             if (activeLogVisible[lab.index]) {
                 logArea.style.display = "flex";
                 logBody.innerHTML = activeLogs[lab.index] || "";
-                setTimeout(() => { logBody.scrollTop = logBody.scrollHeight; }, 0);
+                if (activeLogAutoscroll[lab.index] !== false) {
+                    setTimeout(() => { logBody.scrollTop = logBody.scrollHeight; }, 0);
+                }
             }
 
             const closeLogBtn = card.querySelector(".btn-close-log");
@@ -299,6 +324,115 @@ document.addEventListener("DOMContentLoaded", () => {
                 }
             });
         });
+
+       
+        document.querySelectorAll(".btn-copy-log").forEach(btn => {
+            btn.addEventListener("click", (e) => {
+                e.stopPropagation();
+                const index = btn.dataset.index;
+                const logBody = btn.closest(".lab-card").querySelector(".lab-log-body");
+                if (logBody) {
+                    const clone = logBody.cloneNode(true);
+                    const cursor = clone.querySelector(".terminal-cursor");
+                    if (cursor) cursor.remove();
+                    const text = clone.innerText || clone.textContent;
+                    navigator.clipboard.writeText(text).then(() => {
+                        showToast(`Copied Lab ${index} execution log to clipboard!`, "success");
+                    }).catch(err => {
+                        showToast("Failed to copy log: " + err.message, "error");
+                    });
+                }
+            });
+        });
+
+ 
+        document.querySelectorAll(".btn-autoscroll").forEach(btn => {
+            const index = btn.dataset.index;
+            if (activeLogAutoscroll[index] !== false) {
+                btn.classList.add("active");
+            } else {
+                btn.classList.remove("active");
+            }
+            btn.addEventListener("click", (e) => {
+                e.stopPropagation();
+                const current = activeLogAutoscroll[index] !== false;
+                activeLogAutoscroll[index] = !current;
+                if (!current) {
+                    btn.classList.remove("active");
+                    showToast(`Auto-scroll disabled for Lab ${index}`, "info");
+                } else {
+                    btn.classList.add("active");
+                    showToast(`Auto-scroll enabled for Lab ${index}`, "info");
+                    const logBody = btn.closest(".lab-card").querySelector(".lab-log-body");
+                    if (logBody) logBody.scrollTop = logBody.scrollHeight;
+                }
+            });
+        });
+
+        document.querySelectorAll(".btn-maximize-log").forEach(btn => {
+            btn.addEventListener("click", (e) => {
+                e.stopPropagation();
+                const index = btn.dataset.index;
+                showMaximizedLog(index);
+            });
+        });
+    }
+
+    let maximizedLabIndex = null;
+    let maximizedInterval = null;
+
+    function showMaximizedLog(index) {
+        const lab = labsDataCache.find(l => l.index === parseInt(index));
+        if (!lab) return;
+
+        maximizedLabIndex = index;
+        const labDisplayName = lab.dir.replace(/[-_]/g, " ").replace(/\b\w/g, c => c.toUpperCase());
+        
+        labModalTitle.textContent = `Lab ${index} Terminal Console — ${labDisplayName}`;
+        
+
+        labModalStatus.textContent = lab.status;
+        labModalStatus.className = `lab-modal-status-badge ${
+            lab.status === 'RUNNING' ? 'status-running' : 
+            lab.status === 'PARTIAL' ? 'status-partial' : 'status-stopped'
+        }`;
+
+
+        if (activeLogAutoscroll[index] !== false) {
+            btnModalAutoscroll.classList.add("active");
+        } else {
+            btnModalAutoscroll.classList.remove("active");
+        }
+
+        labLogModal.classList.add("active");
+        
+        const updateMaximizedContent = () => {
+            const currentLogHTML = activeLogs[index] || "<div class=\"log-line\">Console initialized. Waiting for command execution...</div>";
+            labLogBody.innerHTML = currentLogHTML;
+            if (activeLogAutoscroll[index] !== false) {
+                labLogBody.scrollTop = labLogBody.scrollHeight;
+            }
+        };
+
+        updateMaximizedContent();
+
+        if (maximizedInterval) clearInterval(maximizedInterval);
+        maximizedInterval = setInterval(() => {
+            if (!labLogModal.classList.contains("active") || maximizedLabIndex !== index) {
+                clearInterval(maximizedInterval);
+                return;
+            }
+            updateMaximizedContent();
+        }, 1000);
+    }
+
+    function closeLabLogModal() {
+        labLogModal.classList.remove("active");
+        if (maximizedInterval) {
+            clearInterval(maximizedInterval);
+            maximizedInterval = null;
+        }
+        maximizedLabIndex = null;
     }
 
     function startStream(index, action) {
@@ -311,8 +445,8 @@ document.addEventListener("DOMContentLoaded", () => {
         const logBody = card.querySelector(".lab-log-body");
         
         logArea.style.display = "flex";
-        logBody.innerHTML = "";
-        activeLogs[index] = "";
+        logBody.innerHTML = '<span class="terminal-cursor"></span>';
+        activeLogs[index] = logBody.innerHTML;
         activeLogVisible[index] = true;
 
         if (card) {
@@ -327,9 +461,26 @@ document.addEventListener("DOMContentLoaded", () => {
         
         eventSource.onmessage = (event) => {
             const line = event.data;
+            
+            const cursor = logBody.querySelector(".terminal-cursor");
+            if (cursor) cursor.remove();
+
             if (line === "[DONE]") {
                 eventSource.close();
                 eventSource = null;
+                
+                const banner = document.createElement("div");
+                banner.className = "completion-banner completion-banner-success";
+                banner.innerHTML = `<i data-lucide="check-circle" style="width: 14px; height: 14px;"></i> Execution Finished`;
+                logBody.appendChild(banner);
+                
+                lucide.createIcons();
+                
+                if (activeLogAutoscroll[index] !== false) {
+                    logBody.scrollTop = logBody.scrollHeight;
+                }
+                
+                activeLogs[index] = logBody.innerHTML;
                 fetchLabs();
                 return;
             }
@@ -338,7 +489,14 @@ document.addEventListener("DOMContentLoaded", () => {
             logLine.className = "log-line";
             logLine.innerHTML = ansiToHtml(line);
             logBody.appendChild(logLine);
-            logBody.scrollTop = logBody.scrollHeight;
+            
+            const newCursor = document.createElement("span");
+            newCursor.className = "terminal-cursor";
+            logBody.appendChild(newCursor);
+            
+            if (activeLogAutoscroll[index] !== false) {
+                logBody.scrollTop = logBody.scrollHeight;
+            }
             activeLogs[index] = logBody.innerHTML;
         };
 
@@ -357,6 +515,12 @@ document.addEventListener("DOMContentLoaded", () => {
 
         globalLogModal.classList.add("active");
         globalLogBody.innerHTML = "";
+        globalLogBody.className = "modal-body";
+        
+        const modalTitle = document.getElementById("global-modal-title");
+        const actionTitle = action === 'stop-all' ? 'Stop All Labs' : (action === 'clean-all' ? 'Clean All Labs' : 'Rebuild Wordlists');
+        modalTitle.textContent = `Global Task: ${actionTitle}`;
+
         btnCloseGlobalModal.disabled = true;
         btnCloseGlobalModalFooter.disabled = true;
 
@@ -441,16 +605,78 @@ document.addEventListener("DOMContentLoaded", () => {
 
     const closeGlobalModal = () => {
         globalLogModal.classList.remove("active");
+        if (maximizedInterval) {
+            clearInterval(maximizedInterval);
+            maximizedInterval = null;
+        }
+        maximizedLabIndex = null;
     };
 
     btnCloseModal.addEventListener("click", closeTargetsModal);
+    btnCloseLabModal.addEventListener("click", closeLabLogModal);
     window.addEventListener("click", (e) => {
         if (e.target === targetsModal) closeTargetsModal();
         if (e.target === globalLogModal && !btnCloseGlobalModal.disabled) closeGlobalModal();
+        if (e.target === labLogModal) closeLabLogModal();
     });
 
     btnCloseGlobalModal.addEventListener("click", closeGlobalModal);
     btnCloseGlobalModalFooter.addEventListener("click", closeGlobalModal);
+
+
+    btnModalCopyLog.addEventListener("click", () => {
+        if (maximizedLabIndex !== null) {
+            const currentLogText = labLogBody.innerText || labLogBody.textContent;
+            navigator.clipboard.writeText(currentLogText).then(() => {
+                showToast("Copied terminal output to clipboard!", "success");
+            }).catch(err => {
+                showToast("Failed to copy log: " + err.message, "error");
+            });
+        }
+    });
+
+    btnModalAutoscroll.addEventListener("click", () => {
+        if (maximizedLabIndex !== null) {
+            const index = maximizedLabIndex;
+            const current = activeLogAutoscroll[index] !== false;
+            activeLogAutoscroll[index] = !current;
+            
+            if (!current) {
+                btnModalAutoscroll.classList.remove("active");
+                showToast(`Auto-scroll disabled`, "info");
+            } else {
+                btnModalAutoscroll.classList.add("active");
+                showToast(`Auto-scroll enabled`, "info");
+                labLogBody.scrollTop = labLogBody.scrollHeight;
+            }
+
+            const cardAutoscrollBtn = document.querySelector(`.btn-autoscroll[data-index="${index}"]`);
+            if (cardAutoscrollBtn) {
+                if (!current) {
+                    cardAutoscrollBtn.classList.remove("active");
+                } else {
+                    cardAutoscrollBtn.classList.add("active");
+                }
+            }
+        }
+    });
+
+    btnModalClearLog.addEventListener("click", () => {
+        if (maximizedLabIndex !== null) {
+            const index = maximizedLabIndex;
+            
+            activeLogs[index] = '<span class="terminal-cursor"></span>';
+            labLogBody.innerHTML = activeLogs[index];
+            
+            const card = document.querySelector(`.btn-deploy[data-index="${index}"]`).closest('.lab-card');
+            const cardLogBody = card.querySelector(".lab-log-body");
+            if (cardLogBody) {
+                cardLogBody.innerHTML = activeLogs[index];
+            }
+            
+            showToast(`Cleared execution logs for Lab ${index}`, "success");
+        }
+    });
 
     document.getElementById("btn-global-stop").addEventListener("click", () => startGlobalStream("stop-all"));
     document.getElementById("btn-global-clean").addEventListener("click", () => {
