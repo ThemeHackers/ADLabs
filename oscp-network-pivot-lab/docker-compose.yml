@@ -9,7 +9,7 @@ services:
       - PGID=1000
       - TZ=Asia/Bangkok
       - SERVERURL=192.168.1.157
-      - SERVERPORT=51820
+      - SERVERPORT=51822
       - PEERS=1
       - PEERDNS=10.100.10.10
       - INTERNAL_SUBNET=10.252.1.0/24
@@ -17,7 +17,7 @@ services:
     volumes:
       - ./wireguard_oscp:/config
     ports:
-      - 51820:51820/udp
+      - 51822:51820/udp
     networks:
       dmz-net:       { ipv4_address: 10.10.10.150 }
       server-net:    { ipv4_address: 10.20.20.150 }
@@ -26,14 +26,14 @@ services:
 
 
   oscp-exam-router:
-    image: debian:bullseye-slim
+    image: debian:bookworm-slim
     container_name: oscp-exam-router
     privileged: true
     cap_add:
       - NET_ADMIN
     restart: always 
     command: >
-      bash -c "apt-get update && apt-get install -y iptables iproute2 net-tools procps &&
+      bash -c "apt-get update && apt-get install -y --no-install-recommends iptables iproute2 net-tools procps &&
                sysctl -w net.ipv4.ip_forward=1 &&
                iptables -A FORWARD -i eth0 -d 10.20.20.0/24 -j DROP &&
                iptables -A FORWARD -i eth0 -d 10.100.10.0/24 -j DROP &&
@@ -67,6 +67,12 @@ services:
     command: >
       bash -c "echo 'OSCP{internal_database_access_clear}' > /var/db_flag.txt &&
                docker-entrypoint.sh postgres"
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U postgres"]
+      interval: 10s
+      timeout: 5s
+      retries: 12
+      start_period: 20s
     restart: unless-stopped
 
   internal-cache-redis:
@@ -89,6 +95,12 @@ services:
     networks:
       ad-forest-net: { ipv4_address: 10.100.10.20 }
     dns: 127.0.0.1
+    healthcheck:
+      test: ["CMD-SHELL", "samba-tool domain info 127.0.0.1 --configfile=/samba/etc/smb.conf || exit 1"]
+      interval: 15s
+      timeout: 10s
+      retries: 12
+      start_period: 60s
     restart: unless-stopped
 
   ad-forest-parent:
@@ -104,6 +116,12 @@ services:
     networks:
       ad-forest-net: { ipv4_address: 10.100.10.10 }
     dns: 127.0.0.1
+    healthcheck:
+      test: ["CMD-SHELL", "samba-tool domain info 127.0.0.1 --configfile=/samba/etc/smb.conf || exit 1"]
+      interval: 15s
+      timeout: 10s
+      retries: 12
+      start_period: 60s
     restart: unless-stopped
 
   ad-user-automator:

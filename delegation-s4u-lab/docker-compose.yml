@@ -9,28 +9,28 @@ services:
       - PGID=1000
       - TZ=Asia/Bangkok
       - SERVERURL=192.168.1.157
-      - SERVERPORT=51829
+      - SERVERPORT=51825
       - PEERS=1
       - PEERDNS=10.109.10.10
-      - INTERNAL_SUBNET=10.252.10.0/24
+      - INTERNAL_SUBNET=10.252.1.0/24
       - ALLOWEDIPS=10.109.10.0/24,10.109.20.0/24
     volumes:
       - ./wireguard_deleg:/config
     ports:
-      - 51829:51820/udp
+      - 51825:51820/udp
     networks:
       ad-net: { ipv4_address: 10.109.10.150 }
       db-net: { ipv4_address: 10.109.20.150 }
     restart: unless-stopped
 
   deleg-core-router:
-    image: debian:bullseye-slim
+    image: debian:bookworm-slim
     container_name: deleg-core-router
     privileged: true
     cap_add:
       - NET_ADMIN
     command: >
-      sh -c "apt-get update && apt-get install -y iptables iproute2 net-tools procps &&
+      sh -c "apt-get update && apt-get install -y --no-install-recommends iptables iproute2 net-tools procps &&
              sysctl -w net.ipv4.ip_forward=1 &&
              iptables -t nat -A POSTROUTING -j MASQUERADE &&
              sleep infinity"
@@ -55,16 +55,22 @@ services:
     networks:
       ad-net: { ipv4_address: 10.109.10.10 }
     dns: 127.0.0.1
+    healthcheck:
+      test: ["CMD-SHELL", "samba-tool domain info 127.0.0.1 --configfile=/samba/etc/smb.conf || exit 1"]
+      interval: 15s
+      timeout: 10s
+      retries: 12
+      start_period: 60s
     restart: unless-stopped
 
   deleg-db:
-    image: debian:bullseye-slim
+    image: debian:bookworm-slim
     container_name: deleg-db
     privileged: true
     cap_add:
       - NET_ADMIN
     command: >
-      sh -c "apt-get update && apt-get install -y iproute2 procps python3 openssh-server &&
+      sh -c "apt-get update && apt-get install -y --no-install-recommends iproute2 procps python3 openssh-server &&
              (ip route add 10.109.10.0/24 via 10.109.20.254 || true) &&
              echo 'OSCP{constrained_delegation_s4u2self_success}' > /flag.txt &&
              mkdir -p /var/www &&
