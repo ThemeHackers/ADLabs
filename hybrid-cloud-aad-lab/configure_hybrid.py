@@ -57,6 +57,7 @@ def grant_ace(target_dn, trustee_sid, access_mask):
 def grant_extended_right(target_dn, trustee_sid, right_guid_str):
     try:
         import uuid
+        import samba.dcerpc.misc as misc
         u = uuid.UUID(right_guid_str)
         guid_bytes = u.bytes_le
 
@@ -70,7 +71,7 @@ def grant_extended_right(target_dn, trustee_sid, right_guid_str):
         ace.type = security.SEC_ACE_TYPE_ACCESS_ALLOWED_OBJECT
         ace.flags = 0
         ace.access_mask = security.SEC_ADS_CONTROL_ACCESS
-        ace.object_type = security.GUID(right_guid_str)
+        ace.object_type = misc.GUID(right_guid_str)
         ace.inherited_object_type = None
         ace.object_flags = security.SEC_ACE_OBJECT_TYPE_PRESENT
         ace.trustee = trustee_sid
@@ -96,7 +97,6 @@ run_tool(["domain", "passwordsettings", "set", "--complexity=off"])
 run_tool(["domain", "passwordsettings", "set", "--min-pwd-length=4"])
 run_tool(["domain", "passwordsettings", "set", "--account-lockout-threshold=0"])
 
-# 1. Create Enterprise Organizational Units (OUs)
 ous = [
     "OU=Enterprise," + domain_dn,
     "OU=Finance,OU=Enterprise," + domain_dn,
@@ -117,7 +117,6 @@ for ou in ous:
     except Exception:
         pass
 
-# 2. Bulk Seed Enterprise Users
 users_seed = [
     ("l11_t.intern", "InternPass2026!", "HelpDesk Tier 1 Intern", "OU=HelpDesk,OU=Enterprise," + domain_dn),
     ("devops_admin", "DevOpsPass2026!", "DevOps Lead Engineer", "OU=IT-Ops,OU=Enterprise," + domain_dn),
@@ -132,7 +131,6 @@ users_seed = [
 for username, pwd, desc, user_ou in users_seed:
     run_tool(["user", "create", username, pwd, "--userou=" + user_ou.replace("," + domain_dn, ""), "--description=" + desc])
 
-# 3. Create Security Groups
 run_tool(["group", "create", "HelpDesk-Tier1", "--groupou=OU=HelpDesk,OU=Enterprise"])
 run_tool(["group", "create", "DevOps-Admins", "--groupou=OU=IT-Ops,OU=Enterprise"])
 run_tool(["group", "create", "Cloud-Sync-Operators", "--groupou=OU=ServiceAccounts,OU=Enterprise"])
@@ -140,34 +138,35 @@ run_tool(["group", "create", "Cloud-Sync-Operators", "--groupou=OU=ServiceAccoun
 run_tool(["group", "addmembers", "HelpDesk-Tier1", "l11_t.intern"])
 run_tool(["group", "addmembers", "DevOps-Admins", "devops_admin"])
 
-# 4. BloodHound ACL Attack Path: HelpDesk-Tier1 has GenericAll on DevOps-Admins
 hd_sid, _ = get_sid_and_dn("sAMAccountName=HelpDesk-Tier1")
 _, devops_group_dn = get_sid_and_dn("sAMAccountName=DevOps-Admins")
+_, devops_user_dn = get_sid_and_dn("sAMAccountName=devops_admin")
 if hd_sid and devops_group_dn:
     grant_ace(devops_group_dn, hd_sid, security.SEC_GENERIC_ALL)
     print("[+] HelpDesk-Tier1 granted GenericAll on DevOps-Admins (BloodHound Path)")
+if hd_sid and devops_user_dn:
+    grant_ace(devops_user_dn, hd_sid, security.SEC_GENERIC_ALL)
+    print("[+] HelpDesk-Tier1 granted GenericAll on devops_admin User (Password Reset Path)")
 
-# 5. Create Azure AD Connect Sync Account (MSOL_a1b2c3d4e5f6)
 msol_account = "MSOL_a1b2c3d4e5f6"
 msol_password = "AADSync_SuperSecret_P@ss2026!#"
 run_tool(["user", "create", msol_account, msol_password, 
           "--userou=OU=ServiceAccounts,OU=Enterprise", 
           "--description=Account created by Azure AD Connect with rights to replicate directory changes."])
 
-# Grant DCSync permissions to MSOL account on Domain Root
 msol_sid, _ = get_sid_and_dn(f"sAMAccountName={msol_account}")
 if msol_sid:
-    # DS-Replication-Get-Changes (1131f6aa-9c07-11d1-f79f-00c04fc2dcd2)
-    grant_extended_right(Dn(samdb, domain_dn), msol_sid, "1131f6aa-9c07-11d1-f79f-00c04fc2dcd2")
-    # DS-Replication-Get-Changes-All (1131f6ad-9c07-11d1-f79f-00c04fc2dcd2)
-    grant_extended_right(Dn(samdb, domain_dn), msol_sid, "1131f6ad-9c07-11d1-f79f-00c04fc2dcd2")
-    print(f"[+] {msol_account} granted DCSync rights (Replicating Directory Changes & Changes All)!")
+    grant_ace(Dn(samdb, domain_dn), msol_sid, security.SEC_GENERIC_ALL)
+    print(f"[+] {msol_account} granted Full Rights / DCSync on Domain Root!")
 
-# 6. Write final flag on DC
 try:
     with open("/var/flag.txt", "w") as f:
         f.write("OSCP{aad_connect_hybrid_sync_account_compromised_2026}\n")
-    print("[+] Flag planted at /var/flag.txt")
+    sysvol_flag = "/samba/state/sysvol/megacorp-cloud.local/flag.txt"
+    with open(sysvol_flag, "w") as f:
+        f.write("OSCP{aad_connect_hybrid_sync_account_compromised_2026}\n")
+    os.chmod(sysvol_flag, 0o777)
+    print("[+] Flag planted at /var/flag.txt and sysvol")
 except Exception as e:
     print(f"[!] Failed to write flag: {e}")
 

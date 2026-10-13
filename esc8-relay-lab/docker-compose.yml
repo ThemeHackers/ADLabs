@@ -8,7 +8,7 @@ services:
       - PUID=1000
       - PGID=1000
       - TZ=Asia/Bangkok
-      - SERVERURL=192.168.1.157
+      - SERVERURL=27.130.60.79
       - SERVERPORT=51830
       - PEERS=1
       - PEERDNS=10.108.10.10
@@ -52,7 +52,7 @@ services:
     volumes:
       - esc8-dc-data:/var/lib/samba
       - ./trigger.py:/tmp/trigger.py
-    entrypoint: ["/bin/sh", "-c", "ip route add 10.108.20.0/24 via 10.108.10.254 || true; ip route add 10.252.9.0/24 via 10.108.10.150 || true; python3 /tmp/trigger.py & exec /samba-ad-dc"]
+    entrypoint: ["/bin/sh", "-c", "ip route add 10.108.20.0/24 via 10.108.10.254 || true; ip route add 10.252.1.0/24 via 10.108.10.150 || true; python3 /tmp/trigger.py & exec /samba-ad-dc"]
     networks:
       ad-net: { ipv4_address: 10.108.10.10 }
     dns: 127.0.0.1

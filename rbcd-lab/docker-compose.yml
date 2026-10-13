@@ -8,7 +8,7 @@ services:
       - PUID=1000
       - PGID=1000
       - TZ=Asia/Bangkok
-      - SERVERURL=192.168.1.157
+      - SERVERURL=27.130.60.79
       - SERVERPORT=52058
       - PEERS=1
       - PEERDNS=10.105.10.10
@@ -65,16 +65,10 @@ services:
         
         echo "Starting Samba AD DC and applying fixes..."
         
-        (
-          sleep 15
-          ln -sf /samba/etc/smb.conf /etc/samba/smb.conf
-          samba-tool dbcheck --cross-ncs --fix --yes --configfile=/samba/etc/smb.conf
-          samba-tool ntacl sysvolreset --configfile=/samba/etc/smb.conf
-        ) &
-        
         exec /samba-ad-dc
     environment:
       - DOMAIN=RBCDLAB
+      - WORKGROUP=RBCDLAB
       - REALM=RBCDLAB.LOCAL
       - ADMIN_PASSWORD=RBCDAccessAdminPass2026!
     volumes:

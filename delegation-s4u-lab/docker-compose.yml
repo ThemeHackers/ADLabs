@@ -8,7 +8,7 @@ services:
       - PUID=1000
       - PGID=1000
       - TZ=Asia/Bangkok
-      - SERVERURL=192.168.1.157
+      - SERVERURL=27.130.60.79
       - SERVERPORT=51825
       - PEERS=1
       - PEERDNS=10.109.10.10

@@ -8,7 +8,7 @@ services:
       - PUID=1000
       - PGID=1000
       - TZ=Asia/Bangkok
-      - SERVERURL=192.168.1.157
+      - SERVERURL=27.130.60.79
       - SERVERPORT=52058
       - PEERS=1
       - PEERDNS=10.112.10.10
@@ -67,16 +67,10 @@ services:
         
         echo "Starting Samba AD DC for SCCM Pivot Lab..."
         
-        (
-          sleep 15
-          ln -sf /samba/etc/smb.conf /etc/samba/smb.conf
-          samba-tool dbcheck --cross-ncs --fix --yes --configfile=/samba/etc/smb.conf
-          samba-tool ntacl sysvolreset --configfile=/samba/etc/smb.conf
-        ) &
-        
         exec /samba-ad-dc
     environment:
       - DOMAIN=CORPMGMT
+      - WORKGROUP=CORPMGMT
       - REALM=CORP-MANAGEMENT.LOCAL
       - ADMIN_PASSWORD=ManagementAdminMasterPass2026!
     volumes:

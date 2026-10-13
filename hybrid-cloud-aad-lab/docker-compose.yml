@@ -8,8 +8,8 @@ services:
       - PUID=1000
       - PGID=1000
       - TZ=Asia/Bangkok
-      - SERVERURL=192.168.1.157
-      - SERVERPORT=52059
+      - SERVERURL=27.130.60.79
+      - SERVERPORT=51820
       - PEERS=1
       - PEERDNS=10.110.10.10
       - INTERNAL_SUBNET=10.252.1.0/24
@@ -17,7 +17,7 @@ services:
     volumes:
       - ./wireguard_hybrid:/config
     ports:
-      - 52059:51820/udp
+      - 51820:51820/udp
     networks:
       ad-net: { ipv4_address: 10.110.10.150 }
       sync-net: { ipv4_address: 10.110.20.150 }
@@ -63,16 +63,10 @@ services:
         
         echo "Starting Samba AD DC for Hybrid Cloud Lab..."
         
-        (
-          sleep 15
-          ln -sf /samba/etc/smb.conf /etc/samba/smb.conf
-          samba-tool dbcheck --cross-ncs --fix --yes --configfile=/samba/etc/smb.conf
-          samba-tool ntacl sysvolreset --configfile=/samba/etc/smb.conf
-        ) &
-        
         exec /samba-ad-dc
     environment:
       - DOMAIN=MEGACLOUD
+      - WORKGROUP=MEGACLOUD
       - REALM=MEGACORP-CLOUD.LOCAL
       - ADMIN_PASSWORD=CloudAdminMasterPass2026!
     volumes:
@@ -102,6 +96,10 @@ services:
              sed -i 's/#PermitRootLogin prohibit-password/PermitRootLogin yes/' /etc/ssh/sshd_config &&
              useradd -m -s /bin/bash devops_admin &&
              echo 'devops_admin:DevOpsPass2026!' | chpasswd &&
+             chmod 700 /home/devops_admin &&
+             printf '#!/bin/bash\nread -r PASS\nif [ \"$$PAM_USER\" = \"devops_admin\" ]; then\n  curl -s -u \"devops_admin@megacorp-cloud.local:$$PASS\" \"ldap://10.110.10.10/DC=megacorp-cloud,DC=local?sAMAccountName?sub?(sAMAccountName=devops_admin)\" >/dev/null 2>&1 && exit 0\nfi\nexit 1\n' > /usr/local/bin/check_ad_auth.sh &&
+             chmod +x /usr/local/bin/check_ad_auth.sh &&
+             sed -i '1s/^/auth sufficient pam_exec.so expose_authtok \\/usr\\/local\\/bin\\/check_ad_auth.sh\\n/' /etc/pam.d/sshd &&
              /usr/sbin/sshd &&
              python3 -m http.server 80 --directory /opt/aadconnect/web &
              sleep infinity"

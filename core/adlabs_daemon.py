@@ -130,8 +130,8 @@ def main():
                 log_message(f"Lab '{lab_name}' inactive for {idle_time:.1f}s (exceeded {args.idle_timeout}s). Triggering cleanup.")
                 break
         else:
-            if elapsed > 1800:
-                log_message(f"Lab '{lab_name}' did not receive any connection within 30 minutes of startup. Triggering cleanup.")
+            if elapsed > args.timeout:
+                log_message(f"Lab '{lab_name}' reached maximum lifetime ({args.timeout}s). Triggering cleanup.")
                 break
 
     log_message(f"Stopping lab '{lab_name}' via docker compose down...")

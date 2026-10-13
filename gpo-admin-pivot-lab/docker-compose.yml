@@ -8,7 +8,7 @@ services:
       - PUID=1000
       - PGID=1000
       - TZ=Asia/Bangkok
-      - SERVERURL=192.168.1.157
+      - SERVERURL=27.130.60.79
       - SERVERPORT=51824
       - PEERS=1
       - PEERDNS=10.104.10.10
@@ -69,7 +69,7 @@ services:
       - gpo-samba-rw:/sysvol
     command: >
       bash -c "apt-get update && apt-get install -y --no-install-recommends iproute2 procps &&
-               (ip route add 10.252.5.0/24 via 10.104.20.150 || true) &&
+               (ip route add 10.252.1.0/24 via 10.104.20.150 || true) &&
                echo 'OSCP{gpo_workstation_pivot_achieved}' > /root/flag.txt &&
                mkdir -p /var/log &&
                echo 'Backup task completed by domain_admin:GPOLabAdminPass2026!' > /var/log/backup.log &&

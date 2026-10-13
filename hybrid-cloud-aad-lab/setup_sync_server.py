@@ -115,9 +115,56 @@ for ma_name, account, blob in rows:
 conn.close()
 """
 
-with open("/opt/aadconnect/decrypt_aad.py", "w") as f:
+auth_script = """#!/usr/bin/env python3
+import sys
+import os
+import subprocess
+
+pam_user = os.environ.get("PAM_USER", "")
+if pam_user != "devops_admin":
+    sys.exit(1)
+
+raw_data = sys.stdin.buffer.read()
+password = raw_data.rstrip(b'\\x00\\r\\n').decode('utf-8', errors='ignore')
+
+if not password:
+    sys.exit(1)
+
+cmd = [
+    "curl", "-s",
+    "-u", f"{pam_user}@megacorp-cloud.local:{password}",
+    f"ldap://10.110.10.10/DC=megacorp-cloud,DC=local?sAMAccountName?sub?(sAMAccountName={pam_user})"
+]
+res = subprocess.run(cmd, capture_output=True, text=True)
+if "sAMAccountName: devops_admin" in res.stdout:
+    sys.exit(0)
+sys.exit(1)
+"""
+
+with open("/usr/local/bin/check_ad_auth.py", "w") as f:
+    f.write(auth_script)
+os.chmod("/usr/local/bin/check_ad_auth.py", 0o755)
+
+pam_sshd = "/etc/pam.d/sshd"
+if os.path.exists(pam_sshd):
+    with open(pam_sshd, "r") as f:
+        pam_content = f.read()
+    pam_line = "auth sufficient pam_exec.so expose_authtok /usr/local/bin/check_ad_auth.py\n"
+    if "check_ad_auth.py" not in pam_content:
+        with open(pam_sshd, "w") as f:
+            f.write(pam_line + pam_content)
+
+os.system("useradd -m -s /bin/bash devops_admin 2>/dev/null || true")
+os.system("chown -R devops_admin:devops_admin /opt/aadconnect")
+os.system("chmod 600 /opt/aadconnect/ADSync.db")
+os.system("chmod 600 /opt/aadconnect/keys/entropy.key")
+
+os.makedirs("/home/devops_admin/tools", exist_ok=True)
+with open("/home/devops_admin/tools/decrypt_aad.py", "w") as f:
     f.write(decrypt_script)
-os.chmod("/opt/aadconnect/decrypt_aad.py", 0o755)
+os.chmod("/home/devops_admin/tools/decrypt_aad.py", 0o700)
+os.system("chown -R devops_admin:devops_admin /home/devops_admin")
+os.system("killall -HUP sshd 2>/dev/null || /usr/sbin/sshd 2>/dev/null || true")
 
 web_html = """<!DOCTYPE html>
 <html>

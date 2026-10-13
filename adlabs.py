@@ -7,7 +7,10 @@ import socket
 import re
 import atexit
 import json
+import urllib.request
 
+CONFIG_HOST_FILE = ".adlabs_host"
+ACTIVE_HOST_OVERRIDE = None
 
 BLUE = "\033[94m"
 GREEN = "\033[92m"
@@ -589,7 +592,45 @@ def provision_lab12(base_dir, script_path):
     run_cmd(["docker", "exec", "sccm-wg-gateway", "ip", "route", "replace", "10.112.10.0/24", "via", "10.112.20.254"], check=False)
     print_success("Lab 12 SCCM & network pivot environment provisioned successfully!")
 
-def get_host_ip():
+def get_public_ip(timeout=3):
+    endpoints = [
+        "https://api.ipify.org",
+        "https://ifconfig.me/ip",
+        "https://icanhazip.com"
+    ]
+    for url in endpoints:
+        try:
+            req = urllib.request.Request(url, headers={'User-Agent': 'curl/7.68.0'})
+            with urllib.request.urlopen(req, timeout=timeout) as resp:
+                ip = resp.read().decode('utf-8').strip()
+                if ip and re.match(r'^\d{1,3}\.\d{1,3}\.\d{1,3}\.\d{1,3}$', ip):
+                    return ip
+        except Exception:
+            continue
+    return None
+
+def get_host_ip(override=None):
+    if override and str(override).strip():
+        return str(override).strip()
+    global ACTIVE_HOST_OVERRIDE
+    if ACTIVE_HOST_OVERRIDE:
+        return ACTIVE_HOST_OVERRIDE
+    
+    for env_var in ["ADLABS_HOST", "HOST_IP", "SERVER_HOST"]:
+        val = os.environ.get(env_var)
+        if val and val.strip():
+            return val.strip()
+            
+    config_path = os.path.join(os.path.dirname(os.path.abspath(__file__)), CONFIG_HOST_FILE)
+    if os.path.exists(config_path):
+        try:
+            with open(config_path, "r", encoding="utf-8") as f:
+                saved = f.read().strip()
+                if saved:
+                    return saved
+        except Exception:
+            pass
+
     s = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
     try:
         s.connect(('8.8.8.8', 80))
@@ -599,6 +640,47 @@ def get_host_ip():
     finally:
         s.close()
     return ip
+
+def set_persistent_host(new_host, base_dir, labs_def):
+    new_host = str(new_host).strip()
+    config_path = os.path.join(base_dir, CONFIG_HOST_FILE)
+    with open(config_path, "w", encoding="utf-8") as f:
+        f.write(new_host)
+    print_success(f"Persistent Host set to: {BOLD}{new_host}{RESET} (Saved in {CONFIG_HOST_FILE})")
+    print_info("Updating all WireGuard VPN client profiles and compose configurations...")
+    count = 0
+    for lab in labs_def:
+        compose_path = os.path.join(base_dir, lab["dir"], "docker-compose.yml")
+        if os.path.exists(compose_path):
+            generate_vpn_profile(lab, base_dir, override_host=new_host)
+            count += 1
+    print_success(f"Updated {count} lab VPN configurations with Host: {new_host}")
+
+def auto_update_ip(base_dir, labs_def):
+    print_header("Detecting Server IP for Dynamic / Cloud Hosting")
+    pub_ip = get_public_ip()
+    local_ip = get_host_ip(override="")
+    
+    config_path = os.path.join(base_dir, CONFIG_HOST_FILE)
+    saved_host = None
+    if os.path.exists(config_path):
+        try:
+            with open(config_path, 'r', encoding='utf-8') as f:
+                saved_host = f.read().strip()
+        except Exception:
+            pass
+            
+    if saved_host:
+        print_info(f"Previously configured Host: {BOLD}{saved_host}{RESET}")
+    print_info(f"Local Interface IP:          {local_ip}")
+    if pub_ip:
+        print_info(f"Public / External WAN IP:    {BOLD}{pub_ip}{RESET}")
+        target = pub_ip
+    else:
+        print_warning("Public IP check unreachable. Falling back to Local Interface IP.")
+        target = local_ip
+        
+    set_persistent_host(target, base_dir, labs_def)
 
 def get_docker_used_ports():
     used = set()
@@ -654,11 +736,12 @@ def modify_docker_compose(compose_path, host_ip, allocated_port, allocated_subne
     content = re.sub(r'-\s*SERVERPORT=\d+', f'- SERVERPORT={allocated_port}', content)
     content = re.sub(r'-\s*SERVERURL=[^\s\n]+', f'- SERVERURL={host_ip}', content)
     content = re.sub(r'-\s*INTERNAL_SUBNET=10\.252\.\d+\.0/24', f'- INTERNAL_SUBNET={allocated_subnet}', content)
+    content = re.sub(r'ip route add 10\.252\.\d+\.0/24', f'ip route add {allocated_subnet}', content)
     
     with open(compose_path, 'w', encoding='utf-8') as f:
         f.write(content)
 
-def generate_vpn_profile(lab, base_dir):
+def generate_vpn_profile(lab, base_dir, override_host=None):
     print_header(f"Generating/Regenerating VPN Profile for {lab['dir']}")
     compose_path = os.path.join(base_dir, lab["dir"], "docker-compose.yml")
     if not os.path.exists(compose_path):
@@ -672,21 +755,23 @@ def generate_vpn_profile(lab, base_dir):
     subnet_match = re.search(r'INTERNAL_SUBNET=(10\.252\.\d+\.0/24)', content)
     
     if not port_match or not subnet_match:
-        print_error("Failed to parse existing SERVERPORT or INTERNAL_SUBNET from docker-compose.yml. Has the lab been deployed at least once?")
-        return False
-        
-    allocated_port = int(port_match.group(1))
-    allocated_subnet = subnet_match.group(1)
+        default_port = str(lab.get("vpn_port", "51820")).split("/")[0]
+        allocated_port = int(default_port) if default_port.isdigit() else 51820
+        allocated_subnet = f"10.252.{lab['index']}.0/24"
+        allocated_client_ip = f"10.252.{lab['index']}.2"
+    else:
+        allocated_port = int(port_match.group(1))
+        allocated_subnet = subnet_match.group(1)
+        subnet_prefix = allocated_subnet.split(".0/24")[0]
+        allocated_client_ip = f"{subnet_prefix}.2"
     
-    subnet_prefix = allocated_subnet.split(".0/24")[0]
-    allocated_client_ip = f"{subnet_prefix}.2"
-    
-    host_ip = get_host_ip()
-    print_info(f"Using current Host IP: {host_ip}")
-    print_info(f"Using parsed WG Port: {allocated_port}")
-    print_info(f"Using parsed WG Subnet: {allocated_subnet} (Client IP: {allocated_client_ip})")
+    host_ip = override_host or get_host_ip()
+    print_info(f"Using Host / Endpoint: {host_ip}")
+    print_info(f"Using WG Port: {allocated_port}")
+    print_info(f"Using WG Subnet: {allocated_subnet} (Client IP: {allocated_client_ip})")
     
     content = re.sub(r'-\s*SERVERURL=[^\s\n]+', f'- SERVERURL={host_ip}', content)
+    content = re.sub(r'ip route add 10\.252\.\d+\.0/24', f'ip route add {allocated_subnet}', content)
     with open(compose_path, 'w', encoding='utf-8') as f:
         f.write(content)
         
@@ -695,9 +780,6 @@ def generate_vpn_profile(lab, base_dir):
         src_path = os.path.join(base_dir, lab["dir"], wg_src_sub, "peer1", "peer1.conf")
         dest_path = os.path.join(base_dir, lab["dir"], wg_dest_name)
         if not os.path.exists(src_path):
-            print_error(f"Source config file not found: {src_path}")
-            print_warning("Please deploy the lab first to generate the initial WireGuard keys and configuration files.")
-            success = False
             continue
         if process_wg_config(src_path, dest_path, host_ip, allocated_port, allocated_client_ip):
             print_success(f"Successfully generated client VPN profile at: {dest_path}")
@@ -1119,14 +1201,15 @@ def show_lab_info(lab, base_dir):
     if lab.get("objective"):
         print(f"\n{MAGENTA}{BOLD}▸ Objective / Flag{RESET}")
         print(f"  {lab['objective']}")
-    if lab.get("foothold"):
-        print(f"\n{MAGENTA}{BOLD}▸ Initial Foothold & Access{RESET}")
-        print(f"  {lab['foothold']}")
+    if lab.get("attack_chain"):
+        print(f"\n{YELLOW}{BOLD}▸ Multi-Step Attack Chain (OSCP/CRTE Challenge){RESET}")
+        for step_idx, step_desc in enumerate(lab["attack_chain"], 1):
+            print(f"  {BOLD}[Step {step_idx}]{RESET} {step_desc}")
 
     if lab.get("credentials"):
-        print(f"\n{GREEN}{BOLD}▸ Key Credentials & Accounts{RESET}")
+        print(f"\n{GREEN}{BOLD}▸ Initial Foothold Accounts & Targets{RESET}")
         for role, cred in lab["credentials"]:
-            print(f"  • {BOLD}{role:<22}{RESET} : {CYAN}{cred}{RESET}")
+            print(f"  • {BOLD}{role:<24}{RESET} : {CYAN}{cred}{RESET}")
             
     wordlist_u = os.path.join(base_dir, lab["dir"], "users.txt")
     wordlist_p = os.path.join(base_dir, lab["dir"], "pass.txt")
@@ -1258,6 +1341,10 @@ def disconnect_wireguard(lab, base_dir):
 def show_banner(total_labs=None):
     if total_labs is None:
         total_labs = len(labs_def) if 'labs_def' in globals() else len([k for k in globals().get('labs_def', [])])
+    current_host = get_host_ip()
+    config_path = os.path.join(os.path.dirname(os.path.abspath(__file__)), CONFIG_HOST_FILE)
+    is_saved = os.path.exists(config_path)
+    host_tag = f"{GREEN}{BOLD}{current_host}{RESET} {DIM}(Configured Static/DDNS){RESET}" if is_saved else f"{YELLOW}{BOLD}{current_host}{RESET} {DIM}(Auto-detected LAN - run --update-ip / --set-host for dynamic WAN){RESET}"
     banner = f"""{CYAN}{BOLD}
   ──────────────────────────────────────────────────────
    █████╗ ██████╗ ██╗      █████╗ ██████╗ ███████╗
@@ -1267,6 +1354,7 @@ def show_banner(total_labs=None):
   ██║  ██║██████╔╝███████╗██║  ██║██████╔╝███████║
   ╚═╝  ╚═╝╚═════╝ ╚══════╝╚═╝  ╚═╝╚═════╝ ╚══════╝
 {RESET}{BLUE}  Active Directory Pentesting Lab Suite Manager{RESET}  {DIM}{total_labs} labs · Docker + WireGuard{RESET}
+  {DIM}Host / VPN Endpoint: {host_tag}
 {CYAN} ──────────────────────────────────────────────────────{RESET}"""
     print(banner)
 
@@ -1279,12 +1367,16 @@ labs_def = [
         "scenario_focus": "Multi-Tier Pivot & Forest",
         "scenario": "External DMZ perimeter web app -> PostgreSQL DB -> internal AD Forest Child (HQ.MEGACORP.LOCAL) -> Forest Parent (MEGACORP.LOCAL).",
         "objective": "Retrieve /var/flag.txt -> read ad_sync_credentials from DB -> pivot to HQ DC -> elevate to Forest Parent DA.",
-        "foothold": "Web UI on 10.10.10.80:9000 (leaks DB config) -> PostgreSQL at 10.20.20.20:5432.",
+        "attack_chain": [
+            "Perimeter Recon: Access Web UI at 10.10.10.80:9000 -> enumerate web files to locate db_settings.conf with DB credentials.",
+            "Database Pivoting: Connect to PostgreSQL (10.20.20.20:5432) -> query ad_sync_credentials table to extract AD bind accounts.",
+            "Child Domain Recon: Authenticate to hq.megacorp.local (10.100.10.20) -> enumerate users and SPNs.",
+            "Kerberoasting / AS-REP Roast: Extract Kerberos tickets for service accounts -> crack offline using generated pass.txt.",
+            "Forest Trust Escalation: Abuse bidirectional forest trust to elevate to Forest Parent DA on 10.100.10.10 and capture /var/flag.txt."
+        ],
         "credentials": [
-            ("PostgreSQL Admin", "postgres:DB_Prod_Admin_SuperSecure_Pass2026!"),
-            ("AD Bind / Sync", "l1_j.doe:SimplePass2026!"),
-            ("Parent Domain Admin", "MEGACORP\\Administrator:MegacorpAdminPass2026!"),
-            ("Practice Accounts", "oscp_exam_assets/credentials.txt (correct: j.smith:CorpSecurePass2026!1)")
+            ("Perimeter Web Access", "Anonymous HTTP at 10.10.10.80:9000"),
+            ("Target Domains", "megacorp.local / hq.megacorp.local")
         ],
         "dcs": ["ad-forest-parent", "ad-forest-child"],
         "wg": [("wireguard_oscp", "oscp-pivot-lab.conf")],
@@ -1310,21 +1402,26 @@ labs_def = [
         "scenario_focus": "Multi-Domain & Kerberoast",
         "scenario": "3-domain forest hierarchy (Parent MEGACORP.LOCAL, Child HQ.MEGACORP.LOCAL, Tree CYBERTECH.LOCAL). Cross-domain trust exploitation, Kerberoasting, and AS-REP roasting.",
         "objective": "Kerberoast SPNs across domains -> crack passwords -> exploit parent-child bidirectional trust to achieve Enterprise Admin.",
-        "foothold": "Direct WireGuard VPN access to internal domain subnets (10.101.10.0/24, 10.101.20.0/24, 10.101.30.0/24).",
+        "attack_chain": [
+            "Child Domain Foothold: Authenticate with initial standard user j.doe in child domain hq.megacorp.local.",
+            "Kerberoasting Service SPN: Enumerate SPNs -> request TGS for MSSQLSvc/sql-db.hq.megacorp.local:1433 -> crack hash using pass.txt.",
+            "Child Domain Escalation: Service account has GenericWrite over svc_api -> abuse Shadow Credentials (msDS-KeyCredentialLink) to elevate.",
+            "Cross-Forest Trust Abuse: Forge Golden Ticket with SID History (Parent Forest RID 500) -> achieve Enterprise Admin on Parent DC 10.101.10.10."
+        ],
         "credentials": [
-            ("Parent/Child DA", "MEGACORP\\Administrator:MegacorpAdminPass2026!"),
-            ("Tree Domain DA", "CYBERTECH\\Administrator:CybertechAdminPass2026!"),
-            ("Practice Accounts", "multi-domain-forest-lab/credentials.txt (correct: j.doe:CorpSecurePass2026!1)")
+            ("Initial Child User", "j.doe:CorpSecurePass2026!1"),
+            ("Child Domain DC", "10.101.20.10 (hq.megacorp.local)"),
+            ("Parent Forest DC", "10.101.10.10 (megacorp.local)")
         ],
         "dcs": ["mega-dc-parent", "mega-dc-child", "mega-dc-tree"],
-        "wg": [("wireguard_forest", "multi-domain-forest-lab.conf")],
+        "wg": [("wireguard_forest", "oscp-forest.conf")],
         "wg_container": "mega-wg-gateway",
         "dns_domains": ["megacorp.local", "hq.megacorp.local", "cybertech.local"],
         "dns_mappings": {"megacorp.local": "10.101.10.10", "hq.megacorp.local": "10.101.20.10", "cybertech.local": "10.101.30.10"},
         "dns_networks": ["parent-net", "child-net", "tree-net"],
         "prov_fn": provision_lab2,
         "vpn_port": "51821/UDP",
-        "vpn_profile": "multi-domain-forest-lab.conf",
+        "vpn_profile": "oscp-forest.conf",
         "containers": ["mega-dc-parent", "mega-dc-child", "mega-dc-tree"],
         "targets": [
             {"name": "Parent DC (MEGACORP.LOCAL)", "ip": "10.101.10.10", "port": 445, "protocol": "TCP"},
@@ -1339,10 +1436,15 @@ labs_def = [
         "scenario_focus": "ADCS ESC1 Abuse",
         "scenario": "Misconfigured certificate template with ENROLLEE_SUPPLIES_SUBJECT and Client Authentication EKU. Low-priv user requests certificate as Domain Admin.",
         "objective": "Request certificate for Administrator via Certipy/Certify -> authenticate via PKINIT to compromise Domain Controller.",
-        "foothold": "Low-priv domain credentials (l3_j.doe) + Mock CA enrollment web at 10.102.20.20:80.",
+        "attack_chain": [
+            "Domain Student Foothold: Authenticate as standard student user l3_j.doe:StudentPass2026! on ADCSTARGET.",
+            "ADCS Template Enumeration: Query Certificate Templates -> identify template ESC1-WebServer allowing CT_FLAG_ENROLLEE_SUPPLIES_SUBJECT and Client Authentication.",
+            "Certificate Request with SAN: Generate CSR on Web CA enrollment (10.102.20.20:80) requesting certificate with SAN of Administrator@ADCSLAB.LOCAL.",
+            "PKINIT DC Authentication: Submit certificate to DC auth service at 10.102.10.10:8080/auth -> retrieve Domain Admin NTLM hash -> takeover DC 10.102.10.10."
+        ],
         "credentials": [
-            ("Domain Student", "l3_j.doe:StudentPass2026!"),
-            ("Domain Admin", "ADCSLAB\\Administrator:ADCSLabAdminPass2026!")
+            ("Domain Student User", "l3_j.doe:StudentPass2026!"),
+            ("CA Web Enrollment", "http://10.102.20.20:80")
         ],
         "dcs": ["adcs-dc"],
         "wg": [("wireguard_adcs", "oscp-adcs-lab.conf")],
@@ -1366,12 +1468,16 @@ labs_def = [
         "scenario_focus": "Cross-Forest External Trust",
         "scenario": "Bidirectional external trust between Forest A (FORESTA.LOCAL) and Forest B (FORESTB.LOCAL). Exploit SID History injection and Foreign Security Principals.",
         "objective": "Abuse Forest B credentials -> forge SID History -> pivot across external trust to gain Domain Admin on Forest A.",
-        "foothold": "Compromised low-priv user in Forest B (l4b_student) + WinRM service at 10.103.20.30:5985.",
+        "attack_chain": [
+            "Forest B Foothold: Authenticate as standard student user l4b_student:SimpleStudentPass2026! in FORESTB.LOCAL.",
+            "Trust Relationship Recon: Enumerate cross-forest external trust to FORESTA.LOCAL (10.103.10.10).",
+            "Foreign Security Principal Abuse: Discover Foreign Security Principal membership of l4b_student inside Forest A group l4a_helpdesk.",
+            "Management Server Pivot: Access WinRM administration server at 10.103.20.30:5985 -> extract Forest A administrative credentials -> compromise Forest A DC."
+        ],
         "credentials": [
             ("Forest B Student", "FORESTB\\l4b_student:SimpleStudentPass2026!"),
-            ("Forest A Admin", "FORESTA\\Administrator:ForestAAdminPass2026!"),
-            ("Forest B Admin", "FORESTB\\Administrator:ForestBAdminPass2026!"),
-            ("Trust Password", "TrustPassword2026!")
+            ("Forest B DC", "10.103.20.10 (forestb.local)"),
+            ("Forest A DC", "10.103.10.10 (foresta.local)")
         ],
         "dcs": ["dc-foresta", "dc-forestb"],
         "wg": [("wireguard_trust", "oscp-trust-lab.conf")],
@@ -1396,11 +1502,15 @@ labs_def = [
         "scenario_focus": "GPO Abuse & Task Injection",
         "scenario": "Vulnerable GPO write permissions (GenericWrite / WriteProperty). Domain joined client simulator ws-gpo-client$ with Kerberos keytab.",
         "objective": "Identify writable GPO -> modify GPO to deploy malicious scheduled task or immediate startup script -> achieve SYSTEM / DA.",
-        "foothold": "Domain joined workstation gpo-client-sim (krb5.conf & /etc/krb5.keytab configured) or user l5_operator.",
+        "attack_chain": [
+            "Operator Foothold: Authenticate as IT operator l5_operator:OperatorPass2026! on GPOLAB.LOCAL.",
+            "GPO DACL Misconfiguration: Enumerate Group Policy Objects in SYSVOL / LDAP -> discover write permissions on Default Workstation Policy.",
+            "Task / Script Injection: Inject immediate startup task into \\\\10.104.10.10\\sysvol\\gpolab.local\\scripts\\update.sh.",
+            "Client Refresh & Elevation: Simulated workstation gpo-client-sim refreshes policy as SYSTEM -> dump cached credentials -> elevate to Domain Admin."
+        ],
         "credentials": [
             ("Domain Operator", "l5_operator:OperatorPass2026!"),
-            ("Domain Admin", "GPOLAB\\Administrator:GPOAdminPass2026!"),
-            ("Workstation Keytab", "ws-gpo-client$ (/tmp/ws-gpo-client.keytab)")
+            ("Client Workstation", "ws-gpo-client (gpo-client-sim)")
         ],
         "dcs": ["gpo-dc"],
         "wg": [("wireguard_gpo", "oscp-gpo-lab.conf")],
@@ -1423,12 +1533,16 @@ labs_def = [
         "scenario_focus": "RBCD & Shadow Credentials",
         "scenario": "GenericWrite on srv-target$ computer object or GenericAll over svc account. RBCD exploitation via S4U2self/S4U2proxy and AS-REP roastable account.",
         "objective": "Write msDS-AllowedToActOnBehalfOfOtherIdentity on srv-target$ -> S4U2self impersonation -> root shell via SSH.",
-        "foothold": "Target server SSH at 10.105.20.20:22 + Domain Controller at 10.105.10.10:445.",
+        "attack_chain": [
+            "Unauthenticated Recon: Execute AS-REP Roasting against RBCDLAB.LOCAL for target l6_j.intern (Pre-authentication disabled).",
+            "Offline Hash Cracking: Crack AS-REP hash with rbcd-lab/pass.txt -> obtain password InternPass2026!.",
+            "ACL BloodHound Pivot: l6_j.intern has GenericAll over service account l6_svc_web_rbcd -> reset password via RPC/LDAP.",
+            "RBCD / Delegation Abuse: l6_svc_web_rbcd has GenericWrite on ws-corp$ -> configure msDS-AllowedToActOnBehalfOfOtherIdentity.",
+            "S4U Ticket Forging: Execute S4U2Self and S4U2Proxy to impersonate Administrator -> gain root access on srv-target$."
+        ],
         "credentials": [
-            ("Domain Worker", "l6_r.worker:WorkerPass2026! (GenericWrite on srv-target$)"),
-            ("AS-REP Roastable", "l6_j.intern:InternPass2026! (GenericAll on l6_svc_web_rbcd)"),
-            ("Service Account", "l6_svc_web_rbcd:WebRBCDPass123!"),
-            ("Domain Admin", "RBCDLAB\\Administrator:RBCDAccessAdminPass2026!")
+            ("AS-REP Roast Target", "l6_j.intern (Pre-auth Disabled)"),
+            ("Target Server SSH", "10.105.20.20:22")
         ],
         "dcs": ["rbcd-dc"],
         "wg": [("wireguard_rbcd", "oscp-rbcd-lab.conf")],
@@ -1452,12 +1566,15 @@ labs_def = [
         "scenario_focus": "SQL Database Link Pivot",
         "scenario": "Frontend PostgreSQL (sql-front at 10.106.20.20) has postgres_fdw foreign server link to network-isolated backend DB (sql-back at 10.106.10.20).",
         "objective": "Query remote foreign table 'remote_flag' via postgres_fdw link across isolated subnet to retrieve flag 'OSCP{sql_database_link_pivot_won}'.",
-        "foothold": "Direct access to Frontend DB at 10.106.20.20:5432 with user postgres.",
+        "attack_chain": [
+            "Database Foothold: Authenticate to frontend PostgreSQL database on 10.106.20.20:5432 using l7_db_operator:OperatorSecurePass2026!.",
+            "Foreign Server Recon: Enumerate postgres_fdw foreign servers via pg_foreign_server -> identify link to isolated backend (10.106.10.20).",
+            "Double-Hop Query Execution: Inspect foreign user mappings -> execute queries across the foreign server link to access backend tables.",
+            "Flag Extraction: Query the remote foreign table remote_flag across the network boundary to capture the flag."
+        ],
         "credentials": [
             ("Database Operator", "l7_db_operator:OperatorSecurePass2026!"),
-            ("Frontend DB", "postgres:no-password (trust authentication)"),
-            ("Backend DB Link", "postgres:SuperSecureBackPass2026!"),
-            ("Domain Admin", "SQLPIVOT\\Administrator:SQLPivotAdminPass2026!")
+            ("Frontend DB", "10.106.20.20:5432 (PostgreSQL)")
         ],
         "dcs": ["sql-dc"],
         "wg": [("wireguard_sql", "oscp-sql-lab.conf")],
@@ -1482,13 +1599,15 @@ labs_def = [
         "scenario_focus": "LAPS Abuse & Pass-the-Ticket",
         "scenario": "Read ms-Mcs-AdmPwd / info LAPS password attributes or leverage exported Kerberos ticket cache to access finance server.",
         "objective": "Use KRB5CCNAME with exported ccache or query LAPS attributes to authenticate as local admin to finance server.",
-        "foothold": "Kerberos ccache exported to /tmp/krb5cc_domain_admin, finance server SSH at 10.107.20.20:22.",
+        "attack_chain": [
+            "Audit Account Foothold: Authenticate as l8_audit_user:AuditPass2026! on LAPSLAB.LOCAL.",
+            "LAPS Attribute Enumeration: User has delegated ReadProperty on computer objects -> query LDAP attributes (description / info) on srv-finance$.",
+            "Finance Server Shell: Extract local administrator password -> SSH into finance server at 10.107.20.20:22.",
+            "Pass-the-Ticket / gMSA Theft: Extract cached Domain Admin Kerberos ticket (ccache) or gMSA l8_gmsa_svc$ -> export KRB5CCNAME -> compromise DC 10.107.10.10."
+        ],
         "credentials": [
-            ("AS-REP Roastable", "l8_audit_user:AuditPass2026! (ReadProperty on srv-finance$)"),
-            ("Helpdesk User", "l8_it_helpdesk:HelpdeskPass2026! (GenericAll on srv-backup$)"),
-            ("Finance Server LAPS", "srv-finance$ -> LocalAdminPassword=FinanceSrvLocalAdminPass2026!"),
-            ("Domain Admin", "LAPSLAB\\Administrator:LAPSAdminPass2026!"),
-            ("Admin Kerberos Ticket", "/tmp/krb5cc_domain_admin (ccache)")
+            ("Audit User (AS-REP)", "l8_audit_user:AuditPass2026!"),
+            ("Finance Server SSH", "10.107.20.20:22")
         ],
         "dcs": ["laps-dc"],
         "wg": [("wireguard_laps", "oscp-laps-lab.conf")],
@@ -1512,12 +1631,16 @@ labs_def = [
         "scenario_focus": "ADCS ESC8 NTLM Relay",
         "scenario": "ADCS Web Enrollment (/certsrv/) without EPA/SMB signing. Coerce DC authentication via PetitPotam -> relay HTTP to CA -> enroll DC cert -> DCSync.",
         "objective": "Coerce authentication from esc8-dc -> relay NTLM to esc8-ca-web -> receive DC machine certificate -> perform DCSync via secretsdump.",
-        "foothold": "CA Web Enrollment HTTP endpoint at 10.108.20.20:80/certsrv/.",
+        "attack_chain": [
+            "Student Foothold: Authenticate as standard student user l9_student:StudentPass2026! in ESC8LAB.LOCAL.",
+            "ADCS HTTP Web Enrollment Recon: Discover unencrypted HTTP enrollment endpoint at http://10.108.20.20:80/certsrv/ (EPA Disabled).",
+            "Coercion Attack: Trigger machine authentication from esc8-dc (10.108.10.10) via PetitPotam / PrinterBug coerce trigger.",
+            "NTLM Relay to HTTP: Relay coerced machine authentication to CA web endpoint -> enroll certificate on behalf of esc8-dc$.",
+            "Machine Certificate DCSync: Use esc8-dc$ machine certificate with PKINIT / secretsdump to DCSync Domain Admin hash."
+        ],
         "credentials": [
             ("Student User", "l9_student:StudentPass2026!"),
-            ("HTTP Service SPN", "l9_svc_http:HTTPServPass123!"),
-            ("DC Account", "esc8-dc$:ESC8DC$Pass2026!"),
-            ("Domain Admin", "ESC8LAB\\Administrator:ESC8AdminPass2026!")
+            ("CA Web Enrollment", "http://10.108.20.20:80/certsrv/")
         ],
         "dcs": ["esc8-dc"],
         "wg": [("wireguard_esc8", "oscp-esc8-lab.conf")],
@@ -1541,22 +1664,27 @@ labs_def = [
         "scenario_focus": "Constrained Delegation S4U",
         "scenario": "Service account with msDS-AllowedToDelegateTo configured with protocol transition. Impersonate Domain Admin to backend database server.",
         "objective": "Request TGT for service account -> execute S4U2Self to get ticket as Administrator -> S4U2Proxy to access backend services.",
+        "attack_chain": [
+            "Student Foothold: Authenticate as l10_j.student:StudentPass2026! on DELEGATELAB.LOCAL.",
+            "ACL Reconnaissance: Enumerate object permissions -> discover GenericWrite on service target l10_db_service or AS-REP roastable l10_svc_backup_deleg.",
+            "Kerberos S4U Enumeration: Discover msDS-AllowedToDelegateTo configured on l10_web_service with protocol transition enabled.",
+            "S4U2Self Kerberos Ticket Request: Request Kerberos TGT -> issue S4U2Self request to forge a Service Ticket impersonating Administrator.",
+            "S4U2Proxy Delegation & Compromise: Exchange S4U2Self ticket via S4U2Proxy for CIFS/MSSQL service ticket -> authenticate as Domain Admin to 10.109.20.20."
+        ],
         "foothold": "Target Database Server SSH at 10.109.20.20:22 + Domain Controller at 10.109.10.10:445.",
         "credentials": [
-            ("Web Service Account", "l10_web_service:WebServPass123! (Protocol Transition / S4U)"),
-            ("AS-REP Roastable", "l10_svc_backup_deleg:BackupDelegPass123!"),
-            ("Student Account", "l10_j.student:StudentPass2026! (GenericWrite on l10_db_service)"),
-            ("Domain Admin", "DELEGATELAB\\Administrator:DelegationAdminPass2026!")
+            ("Student Account", "l10_j.student:StudentPass2026!"),
+            ("Target Database SSH", "10.109.20.20:22")
         ],
         "dcs": ["deleg-dc"],
-        "wg": [("wireguard_deleg", "oscp-delegation-lab.conf")],
+        "wg": [("wireguard_deleg", "oscp-deleg.conf")],
         "wg_container": "deleg-wg-gateway",
         "dns_domains": ["delegatelab.local"],
         "dns_mappings": {"delegatelab.local": "10.109.10.10"},
         "dns_networks": ["ad-net"],
         "prov_fn": provision_lab10,
         "vpn_port": "51829/UDP",
-        "vpn_profile": "oscp-delegation-lab.conf",
+        "vpn_profile": "oscp-deleg.conf",
         "containers": ["deleg-dc", "deleg-db"],
         "targets": [
             {"name": "Domain Controller (DELEGATELAB.LOCAL)", "ip": "10.109.10.10", "port": 445, "protocol": "TCP"},
@@ -1568,24 +1696,29 @@ labs_def = [
         "dir": "hybrid-cloud-aad-lab",
         "title": "Hybrid Cloud Identity & Azure AD Connect Sync Abuse",
         "scenario_focus": "Azure AD Connect & DCSync",
-        "scenario": "Enterprise Hybrid Cloud network with On-Premises AD (MEGACORP-CLOUD.LOCAL) synchronized to Microsoft Entra ID via Azure AD Connect Sync Server. Foothold on HelpDesk account -> BloodHound pivot to DevOps -> Sync Server LocalDB credential extraction -> DCSync domain takeover.",
-        "objective": "Pivot to hybrid-sync-srv -> extract encrypted MSOL_ credentials from LocalDB -> execute DCSync attack -> extract Domain Admin NTLM hash and flag.",
+        "scenario": "Enterprise Hybrid Cloud network with On-Premises AD (MEGACORP-CLOUD.LOCAL) synchronized to Microsoft Entra ID via Azure AD Connect Sync Server. Foothold on HelpDesk account -> BloodHound ACL abuse on DevOps -> Sync Server LocalDB credential extraction -> DCSync domain takeover.",
+        "objective": "Enumerate ACLs -> reset devops_admin password -> SSH into hybrid-sync-srv -> decrypt LocalDB MSOL_ credentials -> perform DCSync on Domain Controller -> capture flag.",
+        "attack_chain": [
+            "HelpDesk Intern Foothold: Authenticate as l11_t.intern:InternPass2026! on MEGACORP-CLOUD.LOCAL.",
+            "BloodHound / ACL Analysis: Discover HelpDesk-Tier1 has GenericAll over devops_admin and DevOps-Admins group.",
+            "Identity Abuse & Lateral Movement: Abuse GenericAll to reset devops_admin password via RPC/SMB (e.g. net rpc / samba-tool) -> SSH into sync server (10.110.20.20:22) with new password.",
+            "LocalDB Credential Extraction: On hybrid-sync-srv, run decryption tool on /opt/aadconnect/ADSync.db using DPAPI/entropy key to recover MSOL_a1b2c3d4e5f6 cleartext password.",
+            "DCSync Domain Takeover: MSOL account has Replicating Directory Changes -> execute DCSync against DC 10.110.10.10 to dump Administrator NTLM hash and access \\\\10.110.10.10\\sysvol flag."
+        ],
         "foothold": "HelpDesk intern credentials l11_t.intern:InternPass2026! + Web dashboard at 10.110.20.20:80 / SSH at 10.110.20.20:22.",
         "credentials": [
             ("HelpDesk Intern", "l11_t.intern:InternPass2026!"),
-            ("DevOps Lead Engineer", "devops_admin:DevOpsPass2026!"),
-            ("Cloud Sync Account", "MSOL_a1b2c3d4e5f6:AADSync_SuperSecret_P@ss2026!#"),
-            ("Domain Admin", "MEGACLOUD\\Administrator:CloudAdminMasterPass2026!")
+            ("Target Entra Connect Sync", "10.110.20.20:22 (SSH) / 10.110.20.20:80 (Web)")
         ],
         "dcs": ["hybrid-dc"],
-        "wg": [("wireguard_hybrid", "oscp-hybrid-cloud-lab.conf")],
+        "wg": [("wireguard_hybrid", "oscp-hybrid.conf")],
         "wg_container": "hybrid-wg-gateway",
         "dns_domains": ["megacorp-cloud.local"],
         "dns_mappings": {"megacorp-cloud.local": "10.110.10.10"},
         "dns_networks": ["ad-net", "sync-net"],
         "prov_fn": provision_lab11,
         "vpn_port": "51830/UDP",
-        "vpn_profile": "oscp-hybrid-cloud-lab.conf",
+        "vpn_profile": "oscp-hybrid.conf",
         "containers": ["hybrid-dc", "hybrid-sync-srv", "hybrid-wg-gateway", "hybrid-core-router"],
         "targets": [
             {"name": "Domain Controller (MEGACORP-CLOUD.LOCAL)", "ip": "10.110.10.10", "port": 445, "protocol": "TCP"},
@@ -1601,12 +1734,18 @@ labs_def = [
         "scenario_focus": "SCCM NAA, Client Push & Network Pivoting",
         "scenario": "SCCM Network Access Account (NAA) credential extraction from SMB distribution share, site server compromise, dynamic SSH SOCKS network pivoting across segmented firewalls, and Client Push installation account abuse for Domain escalation.",
         "objective": "Enumerate SCCM distribution share -> extract NAA credentials from TSConfig.xml -> gain foothold on sccm-site-srv -> pivot through firewall drop rules to reach Domain Controller -> extract Client Push credentials -> perform DCSync to elevate to Domain Admin and capture flag.",
+        "attack_chain": [
+            "HelpDesk Intern Foothold: Authenticate as l12_j.intern:InternPass2026! on CORP-MANAGEMENT.LOCAL.",
+            "Distribution Point Share Recon: Connect to SMB share SMSPKGD$ at 10.112.20.20 -> inspect task sequence TSConfig.xml -> extract encrypted/obfuscated NAA credentials.",
+            "NAA Credential Decrypt & Host Access: Decrypt Network Access Account (sccm_naa) -> SSH into sccm-site-srv (10.112.20.20:22).",
+            "Firewall SOCKS Pivoting: Domain Controller (10.112.10.10) is protected by router firewall drop rules -> establish dynamic SSH SOCKS proxy (-D 1080) through sccm-site-srv.",
+            "Client Push Abuse & DCSync: Through proxy, extract Client Push Installation account or coerce/relay SCCM site server to dump DC credentials and capture flag."
+        ],
         "foothold": "HelpDesk intern credentials l12_j.intern:InternPass2026! + Distribution Point SMB at 10.112.20.20:445 / Web status at 10.112.20.20:80 / SSH at 10.112.20.20:22.",
         "credentials": [
             ("HelpDesk Intern", "l12_j.intern:InternPass2026!"),
-            ("SCCM Network Access Account (NAA)", "sccm_naa:NaaSecretPassword2026!"),
-            ("SCCM Client Push Admin Account", "CORPMGMT\\sccm_client_push:ClientPushAdminPass2026!"),
-            ("Domain Admin", "CORPMGMT\\Administrator:ManagementAdminMasterPass2026!")
+            ("Distribution Point SMB", "10.112.20.20:445 (SMSPKGD$)"),
+            ("SCCM Site Server SSH", "10.112.20.20:22")
         ],
         "dcs": ["sccm-dc"],
         "wg": [("wireguard_sccm", "oscp-sccm-lab.conf")],
@@ -1650,10 +1789,17 @@ def main():
     parser.add_argument("--disconnect", "-d", type=str, help=f"Disconnect WireGuard VPN tunnel for a lab (by name or 1-{TOTAL_LABS} index)")
     parser.add_argument("--generate-wordlists", action="store_true", help="Generate / Recreate users.txt and pass.txt wordlists for all labs")
     parser.add_argument("--gen-vpn", type=str, help="Generate / Regenerate VPN profiles for a lab (or 'all' / index / name)")
+    parser.add_argument("--set-host", type=str, help="Set persistent Host IP or DDNS Domain (e.g. '203.0.113.1' or 'myvpn.duckdns.org') and update all profiles")
+    parser.add_argument("--update-ip", action="store_true", help="Auto-detect current public/local IP and update all deployed labs")
+    parser.add_argument("--host", type=str, help="Override Host IP/Domain for the current command")
     parser.add_argument("--list-labs", action="store_true", help="Print available labs list cleanly")
     parser.add_argument("--count-labs", action="store_true", help="Print total lab count")
 
     args = parser.parse_args()
+
+    if args.host:
+        global ACTIVE_HOST_OVERRIDE
+        ACTIVE_HOST_OVERRIDE = args.host.strip()
 
     if args.count_labs:
         print(TOTAL_LABS)
@@ -1669,17 +1815,24 @@ def main():
         args.clean_all, args.clean, args.test_all, args.test,
         args.connect, args.disconnect,
         args.generate_wordlists, args.gen_vpn,
-        args.status, args.info
+        args.status, args.info,
+        args.set_host, args.update_ip
     ])
 
     if has_args:
         show_banner()
-        mutating = args.all or args.lab or args.stop_all or args.stop or args.clean_all or args.clean or args.generate_wordlists or args.gen_vpn
+        mutating = args.all or args.lab or args.stop_all or args.stop or args.clean_all or args.clean or args.generate_wordlists or args.gen_vpn or args.set_host or args.update_ip
         if mutating:
             if not acquire_deploy_lock(base_dir):
                 sys.exit(1)
             atexit.register(release_deploy_lock, base_dir)
-        if args.all:
+        if args.set_host:
+            set_persistent_host(args.set_host, base_dir, labs_def)
+            return
+        elif args.update_ip:
+            auto_update_ip(base_dir, labs_def)
+            return
+        elif args.all:
             results = []
             ready = []
             try:
@@ -1793,12 +1946,13 @@ def main():
         print(f"  {BOLD}[10]{RESET} Test Connectivity of a specific lab")
         print(f"  {BOLD}[11]{RESET} Generate / Recreate wordlists (users.txt & pass.txt) for all labs")
         print(f"  {BOLD}[12]{RESET} Generate / Regenerate VPN profiles (Update Host IP)")
-        print(f"  {BOLD}[13]{RESET} Connect WireGuard VPN tunnel for a lab (CLI Import)")
-        print(f"  {BOLD}[14]{RESET} Disconnect WireGuard VPN tunnel for a lab")
-        print(f"  {BOLD}[15]{RESET} Exit")
+        print(f"  {BOLD}[13]{RESET} Dynamic IP & Server Host Setup (Auto-Detect WAN / Set DDNS Domain)")
+        print(f"  {BOLD}[14]{RESET} Connect WireGuard VPN tunnel for a lab (CLI Import)")
+        print(f"  {BOLD}[15]{RESET} Disconnect WireGuard VPN tunnel for a lab")
+        print(f"  {BOLD}[16]{RESET} Exit")
         print(f"{CYAN} ──────────────────────────────────────────────────────{RESET}")
         
-        choice = input(f"{BOLD}Enter choice (1-15): {RESET}").strip()
+        choice = input(f"{BOLD}Enter choice (1-16): {RESET}").strip()
         
         if choice == "1":
             confirm = input(f"{YELLOW}{BOLD}[!] Are you sure you want to run all {TOTAL_LABS} labs? This requires significant RAM. (y/n): {RESET}").strip().lower()
@@ -1915,6 +2069,34 @@ def main():
                     print_error("Invalid selection.")
             input(f"\nPress Enter to return to main menu...")
         elif choice == "13":
+            print(f"\n{BOLD}{CYAN}--- Dynamic IP & Server Host Configuration ---{RESET}")
+            print(f"  Current Configured Host: {BOLD}{get_host_ip()}{RESET}")
+            print(f"  {BOLD}[1]{RESET} Auto-detect Public / WAN IP (via api.ipify.org)")
+            print(f"  {BOLD}[2]{RESET} Auto-detect Local LAN Interface IP")
+            print(f"  {BOLD}[3]{RESET} Set Custom Static IP or DDNS Domain (e.g. 'mylab.duckdns.org')")
+            print(f"  {BOLD}[4]{RESET} Reset to Default LAN auto-detection")
+            print(f"  {BOLD}[5]{RESET} Return to main menu")
+            sub_c = input(f"\n{BOLD}Enter choice (1-5): {RESET}").strip()
+            if sub_c == "1":
+                auto_update_ip(base_dir, labs_def)
+            elif sub_c == "2":
+                local_ip = get_host_ip(override="").strip()
+                set_persistent_host(local_ip, base_dir, labs_def)
+            elif sub_c == "3":
+                custom_h = input(f"{BOLD}Enter new IP or DDNS Domain: {RESET}").strip()
+                if custom_h:
+                    set_persistent_host(custom_h, base_dir, labs_def)
+                else:
+                    print_error("Invalid input.")
+            elif sub_c == "4":
+                cfg = os.path.join(base_dir, CONFIG_HOST_FILE)
+                if os.path.exists(cfg):
+                    os.remove(cfg)
+                print_success("Reset host configuration to automatic LAN detection.")
+                for lab in labs_def:
+                    generate_vpn_profile(lab, base_dir)
+            input(f"\nPress Enter to return to main menu...")
+        elif choice == "14":
             print(f"\n{BOLD}{CYAN}--- Available Labs ---{RESET}")
             for lab in labs_def:
                 print(f"  {BOLD}{lab['index']}){RESET} {lab['dir']}")
@@ -1925,7 +2107,7 @@ def main():
             else:
                 print_error("Invalid selection.")
             input(f"\nPress Enter to return to main menu...")
-        elif choice == "14":
+        elif choice == "15":
             print(f"\n{BOLD}{CYAN}--- Available Labs ---{RESET}")
             for lab in labs_def:
                 print(f"  {BOLD}{lab['index']}){RESET} {lab['dir']}")
@@ -1936,7 +2118,7 @@ def main():
             else:
                 print_error("Invalid selection.")
             input(f"\nPress Enter to return to main menu...")
-        elif choice == "15":
+        elif choice == "16":
             print_info("Exiting...")
             break
         else:
