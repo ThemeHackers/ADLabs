@@ -1380,7 +1380,7 @@ def disconnect_wireguard(lab, base_dir):
         use_sudo = os.geteuid() != 0 if hasattr(os, "geteuid") else True
         prefix = ["sudo"] if use_sudo else []
         res = subprocess.run(prefix + ["wg-quick", "down", conf_path], capture_output=True, text=True)
-        # Restore docker bridge routes for the lab project if needed
+       
         try:
             inspect_res = subprocess.run(["docker", "network", "ls", "--filter", f"label=com.docker.compose.project={lab['dir']}", "-q"], capture_output=True, text=True)
             if inspect_res.returncode == 0 and inspect_res.stdout.strip():
