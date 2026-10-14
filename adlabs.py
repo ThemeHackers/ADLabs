@@ -1278,8 +1278,40 @@ def connect_wireguard(lab, base_dir):
             print_info("Please install wireguard-tools (e.g. sudo apt install wireguard-tools)")
             print_info(f"Profile file available at: {conf_path}")
             return False
+            
+        try:
+            os.chmod(conf_path, 0o600)
+        except Exception:
+            pass
+
         use_sudo = os.geteuid() != 0 if hasattr(os, "geteuid") else True
         prefix = ["sudo"] if use_sudo else []
+
+        allowed_subnets = []
+        try:
+            with open(conf_path, "r", encoding="utf-8") as f:
+                ccontent = f.read()
+            ccontent_local = re.sub(r'Endpoint\s*=\s*[^:\n]+:(\d+)', r'Endpoint = 127.0.0.1:\1', ccontent)
+            if ccontent_local != ccontent:
+                with open(conf_path, "w", encoding="utf-8") as f:
+                    f.write(ccontent_local)
+                ccontent = ccontent_local
+
+            for line in ccontent.splitlines():
+                if line.strip().startswith("AllowedIPs"):
+                    _, vals = line.strip().split("=", 1)
+                    allowed_subnets = [v.strip() for v in vals.split(",") if v.strip()]
+        except Exception:
+            pass
+
+        if allowed_subnets:
+            route_out = subprocess.run(["ip", "-4", "route", "show"], capture_output=True, text=True).stdout
+            for rline in route_out.splitlines():
+                parts = rline.strip().split()
+                if len(parts) >= 3 and parts[1] == "dev" and (parts[2].startswith("br-") or parts[2].startswith("docker")):
+                    if parts[0] in allowed_subnets:
+                        subprocess.run(prefix + ["ip", "route", "del", parts[0], "dev", parts[2]], capture_output=True)
+
         subprocess.run(prefix + ["wg-quick", "down", conf_path], capture_output=True)
         res = subprocess.run(prefix + ["wg-quick", "up", conf_path], capture_output=True, text=True)
         if res.returncode == 0:
@@ -1348,6 +1380,24 @@ def disconnect_wireguard(lab, base_dir):
         use_sudo = os.geteuid() != 0 if hasattr(os, "geteuid") else True
         prefix = ["sudo"] if use_sudo else []
         res = subprocess.run(prefix + ["wg-quick", "down", conf_path], capture_output=True, text=True)
+        # Restore docker bridge routes for the lab project if needed
+        try:
+            inspect_res = subprocess.run(["docker", "network", "ls", "--filter", f"label=com.docker.compose.project={lab['dir']}", "-q"], capture_output=True, text=True)
+            if inspect_res.returncode == 0 and inspect_res.stdout.strip():
+                for net_id in inspect_res.stdout.strip().split():
+                    net_info = subprocess.run(["docker", "network", "inspect", net_id], capture_output=True, text=True)
+                    if net_info.returncode == 0:
+                        data = json.loads(net_info.stdout)
+                        if data and "IPAM" in data[0] and "Config" in data[0]["IPAM"]:
+                            for cfg in data[0]["IPAM"]["Config"]:
+                                sub = cfg.get("Subnet")
+                                gw = cfg.get("Gateway")
+                                br_if = f"br-{net_id[:12]}"
+                                if sub and gw:
+                                    subprocess.run(prefix + ["ip", "route", "add", sub, "dev", br_if, "proto", "kernel", "scope", "link", "src", gw], capture_output=True)
+        except Exception:
+            pass
+
         if res.returncode == 0:
             print_success(f"WireGuard tunnel '{tunnel_name}' disconnected successfully.")
             return True
