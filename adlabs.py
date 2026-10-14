@@ -10,6 +10,48 @@ import json
 import urllib.request
 import shutil
 
+# Core ADLabs modules
+try:
+    from core.generate_wordlists import (
+        create_wordlist_for_lab,
+        generate_all_wordlists,
+        load_lab_credentials
+    )
+except ImportError:
+    create_wordlist_for_lab = None
+    generate_all_wordlists = None
+    load_lab_credentials = None
+
+try:
+    from core.flag_manager import (
+        load_flags_db,
+        init_flags_for_all_labs,
+        submit_flag,
+        get_hints,
+        calculate_score
+    )
+except ImportError:
+    load_flags_db = None
+    init_flags_for_all_labs = None
+    submit_flag = None
+    get_hints = None
+    calculate_score = None
+
+try:
+    from core.mock_exam import (
+        start_mock_exam,
+        get_exam_status,
+        stop_mock_exam,
+        load_exam_session,
+        submit_exam_flag
+    )
+except ImportError:
+    start_mock_exam = None
+    get_exam_status = None
+    stop_mock_exam = None
+    load_exam_session = None
+    submit_exam_flag = None
+
 CONFIG_HOST_FILE = ".adlabs_host"
 ACTIVE_HOST_OVERRIDE = None
 
@@ -24,7 +66,7 @@ DIM = "\033[2m"
 RESET = "\033[0m"
 
 if os.name == 'nt':
-    os.system('') 
+    os.system('')
 
 def print_info(msg):
     print(f"{CYAN}[*] {msg}{RESET}")
@@ -168,13 +210,13 @@ def run_cmd(cmd, check=True):
         stdout_lines.append(line)
     process.stdout.close()
     return_code = process.wait()
-    
+
     class MockCompletedProcess:
         def __init__(self, returncode, stdout, stderr):
             self.returncode = returncode
             self.stdout = stdout
             self.stderr = stderr
-            
+
     res = MockCompletedProcess(return_code, ''.join(stdout_lines), '')
     if res.returncode != 0:
         if check:
@@ -259,7 +301,7 @@ def process_wg_config(src_path, dest_path, host_ip, allocated_port, allocated_cl
     if not os.path.exists(src_path):
         print_error(f"Error: WG config file {src_path} not found.")
         return False
-    
+
     with open(src_path, "r") as f:
         lines = f.readlines()
     filtered = []
@@ -273,7 +315,7 @@ def process_wg_config(src_path, dest_path, host_ip, allocated_port, allocated_cl
             filtered.append(f"Endpoint = {host_ip}:{allocated_port}\n")
         else:
             filtered.append(line)
-            
+
     with open(dest_path, "w") as f:
         f.writelines(filtered)
     try:
@@ -295,7 +337,7 @@ def process_generated_creds(src_container, dest_dir):
         except Exception:
             pass
     run_cmd(["docker", "cp", f"{src_container}:/tmp/credentials_generated.txt", cred_host_path], check=False)
-    
+
     if os.path.exists(cred_host_path):
         with open(cred_host_path, "r") as f:
             lines = f.read().splitlines()
@@ -316,10 +358,10 @@ def process_generated_creds(src_container, dest_dir):
 def provision_lab1(base_dir, script_path):
     print_header("Provisioning Lab 1 (oscp-network-pivot-lab)")
     run_cmd(["docker", "exec", "perimeter-nginx-ui", "sh", "-c", "echo 'OSCP{foothold_perimeter_breached}' > /var/flag.txt"], check=False)
-    
+
     run_cmd(["docker", "exec", "perimeter-nginx-ui", "sh", "-c", "mkdir -p /var/www/html && printf '[database]\\ndb_host = 10.20.20.20\\ndb_port = 5432\\ndb_user = postgres\\ndb_pass = DB_Prod_Admin_SuperSecure_Pass2026!\\ndb_name = production\\n' > /var/www/html/db_settings.conf"], check=False)
     run_cmd(["docker", "exec", "perimeter-nginx-ui", "sh", "-c", "printf '[database]\\ndb_host = 10.20.20.20\\ndb_port = 5432\\ndb_user = postgres\\ndb_pass = DB_Prod_Admin_SuperSecure_Pass2026!\\ndb_name = production\\n' > /tmp/db_config.txt"], check=False)
-    
+
     print_info("Waiting for internal-postgres-db to accept connections...")
     db_ready = False
     for _ in range(15):
@@ -330,13 +372,10 @@ def provision_lab1(base_dir, script_path):
             break
         time.sleep(2)
 
-    if db_ready:
-        run_cmd(["docker", "exec", "-u", "postgres", "internal-postgres-db", "psql", "-d", "postgres", "-c", "CREATE TABLE IF NOT EXISTS ad_sync_credentials (id SERIAL PRIMARY KEY, service_name VARCHAR(100), ad_username VARCHAR(100), ad_password VARCHAR(100), description TEXT);"], check=False)
-        run_cmd(["docker", "exec", "-u", "postgres", "internal-postgres-db", "psql", "-d", "postgres", "-c", "INSERT INTO ad_sync_credentials (service_name, ad_username, ad_password, description) VALUES ('LDAP User Sync', 'l1_j.doe', 'SimplePass2026!', 'AD Bind account for synchronizing users');"], check=False)
-    else:
+    if not db_ready:
         print_warning("Could not verify internal-postgres-db readiness. Attempting queries anyway...")
-        run_cmd(["docker", "exec", "-u", "postgres", "internal-postgres-db", "psql", "-d", "postgres", "-c", "CREATE TABLE IF NOT EXISTS ad_sync_credentials (id SERIAL PRIMARY KEY, service_name VARCHAR(100), ad_username VARCHAR(100), ad_password VARCHAR(100), description TEXT);"], check=False)
-        run_cmd(["docker", "exec", "-u", "postgres", "internal-postgres-db", "psql", "-d", "postgres", "-c", "INSERT INTO ad_sync_credentials (service_name, ad_username, ad_password, description) VALUES ('LDAP User Sync', 'l1_j.doe', 'SimplePass2026!', 'AD Bind account for synchronizing users');"], check=False)
+    run_cmd(["docker", "exec", "-u", "postgres", "internal-postgres-db", "psql", "-d", "postgres", "-c", "CREATE TABLE IF NOT EXISTS ad_sync_credentials (id SERIAL PRIMARY KEY, service_name VARCHAR(100), ad_username VARCHAR(100), ad_password VARCHAR(100), description TEXT);"], check=False)
+    run_cmd(["docker", "exec", "-u", "postgres", "internal-postgres-db", "psql", "-d", "postgres", "-c", "INSERT INTO ad_sync_credentials (service_name, ad_username, ad_password, description) VALUES ('LDAP User Sync', 'l1_j.doe', 'SimplePass2026!', 'AD Bind account for synchronizing users');"], check=False)
 
     run_cmd(["docker", "cp", script_path, "ad-forest-parent:/tmp/configure_ad.py"])
     run_cmd(["docker", "exec", "ad-forest-parent", "python3", "/tmp/configure_ad.py", "--role", "parent", "--realm", "MEGACORP.LOCAL", "--user-prefix", "l1_"])
@@ -344,7 +383,7 @@ def provision_lab1(base_dir, script_path):
     practice_users_l1 = "j.smith r.jones m.brown t.taylor d.miller j.wilson b.moore s.taylor a.anderson k.thomas c.jackson m.white l.harris e.martin r.clark s.lewis g.robinson j.walker k.young p.allen"
     run_cmd(["docker", "exec", "ad-forest-child", "python3", "/tmp/configure_ad.py", "--role", "child", "--realm", "HQ.MEGACORP.LOCAL", "--practice-users", practice_users_l1, "--user-prefix", "l1_"])
     process_generated_creds("ad-forest-child", os.path.join(base_dir, "labs", "oscp-network-pivot-lab", "oscp_exam_assets"))
-    
+
     print_info("Applying anti-cheat network isolation rules to WireGuard gateway...")
     run_cmd(["docker", "exec", "oscp-wg-gateway", "iptables", "-I", "FORWARD", "-i", "wg0", "-d", "10.20.20.20", "-p", "tcp", "--dport", "5432", "-j", "ACCEPT"], check=False)
     run_cmd(["docker", "exec", "oscp-wg-gateway", "iptables", "-I", "FORWARD", "-i", "wg0", "-d", "10.20.20.30", "-p", "tcp", "--dport", "6379", "-j", "ACCEPT"], check=False)
@@ -419,24 +458,24 @@ samdb = samba.samdb.SamDB('/samba/private/sam.ldb', lp=lp, session_info=system_s
 try:
     res_da = samdb.search(expression='sAMAccountName=Domain Admins')
     da_dn = res_da[0].dn
-    
+
     res_gp = samdb.search(expression='sAMAccountName=l4a_helpdesk')
     gp_sid = samba.ndr.ndr_unpack(security.dom_sid, bytes(res_gp[0]['objectSid'][0]))
-    
+
     res_sd = samdb.search(base=da_dn, attrs=['nTSecurityDescriptor'])
     sd = samba.ndr.ndr_unpack(security.descriptor, bytes(res_sd[0]['nTSecurityDescriptor'][0]))
-    
+
     new_ace = security.ace()
     new_ace.type = security.SEC_ACE_TYPE_ACCESS_ALLOWED
     new_ace.flags = 0
     new_ace.access_mask = security.SEC_GENERIC_WRITE
     new_ace.trustee = gp_sid
-    
+
     aces = list(sd.dacl.aces) if sd.dacl and sd.dacl.aces else []
     aces.append(new_ace)
     sd.dacl.aces = aces
     sd.dacl.num_aces = len(aces)
-    
+
     msg = Message()
     msg.dn = da_dn
     from ldb import FLAG_MOD_REPLACE
@@ -465,12 +504,12 @@ def provision_lab5(base_dir, script_path):
     run_cmd(["docker", "exec", "gpo-dc", "chmod", "-R", "777", "/samba/state/sysvol/gpolab.local/scripts"])
     run_cmd(["docker", "exec", "gpo-dc", "sh", "-c", "echo '#!/bin/sh\necho \"System update checked\"' > /samba/state/sysvol/gpolab.local/scripts/update.sh"])
     run_cmd(["docker", "exec", "gpo-dc", "chmod", "+x", "/samba/state/sysvol/gpolab.local/scripts/update.sh"])
-    
+
     print_info("Creating authentic GPO GUID folder structure...")
     gpo_guid = "{3137632E-FA86-4d0f-A02F-A5C94B3C53F7}"
     gpo_path = f"/samba/state/sysvol/gpolab.local/Policies/{gpo_guid}/Machine/Preferences/Groups"
     run_cmd(["docker", "exec", "gpo-dc", "mkdir", "-p", gpo_path], check=False)
-    
+
     groups_xml = """<?xml version="1.0" encoding="utf-8"?>
 <Groups clsid="{3125E73C-5169-448C-889E-1ECC56BAA9A4}">
   <User clsid="{DF5F1855-0E2C-4586-819E-E8C4B5D487E0}" name="LocalAdmin" image="2" changed="2026-01-01 00:00:00" uid="{GUID}" userContext="0" removePolicy="0">
@@ -479,11 +518,11 @@ def provision_lab5(base_dir, script_path):
 </Groups>"""
     run_cmd(["docker", "exec", "gpo-dc", "sh", "-c", f"cat > {gpo_path}/Groups.xml << 'EOF'\n{groups_xml}\nEOF"], check=False)
     print_success("Authentic GPO Groups.xml injected with cpassword attribute")
-    
+
     print_info("Registering computer account ws-gpo-client$ in Active Directory...")
     run_cmd(["docker", "exec", "gpo-dc", "samba-tool", "computer", "create", "ws-gpo-client", "--configfile=/samba/etc/smb.conf"], check=False)
     run_cmd(["docker", "exec", "gpo-dc", "samba-tool", "user", "setpassword", "ws-gpo-client$", "--newpassword=GPOLabAdminPass2026!", "--configfile=/samba/etc/smb.conf"], check=False)
-    
+
     print_info("Configuring /etc/krb5.conf inside gpo-client-sim...")
     krb5_conf = """[libdefaults]
     default_realm = GPOLAB.LOCAL
@@ -502,10 +541,10 @@ def provision_lab5(base_dir, script_path):
     gpolab.local = GPOLAB.LOCAL
 """
     run_cmd(["docker", "exec", "gpo-client-sim", "sh", "-c", "cat > /etc/krb5.conf << 'EOF'\n" + krb5_conf + "EOF"], check=False)
-    
+
     print_info("Exporting computer keytab for ws-gpo-client$...")
     keytab_export = run_cmd(["docker", "exec", "gpo-dc", "samba-tool", "domain", "exportkeytab", "/tmp/ws-gpo-client.keytab", "--principal=ws-gpo-client$@GPOLAB.LOCAL", "--configfile=/samba/etc/smb.conf"], check=False)
-    
+
     if keytab_export.returncode == 0:
         print_info("Copying keytab to gpo-client-sim container...")
         copy_result = run_cmd(["docker", "cp", "gpo-dc:/tmp/ws-gpo-client.keytab", "/tmp/ws-gpo-client.keytab"], check=False)
@@ -528,18 +567,18 @@ def provision_lab7(base_dir, script_path):
     run_cmd(["docker", "cp", os.path.join(base_dir, "labs", "sql-pivot-lab", "configure_sql.py"), "sql-dc:/tmp/configure_sql.py"])
     run_cmd(["docker", "exec", "sql-dc", "python3", "/tmp/configure_sql.py"])
     run_cmd(["docker", "exec", "sql-dc", "samba-tool", "user", "setpassword", "Administrator", "--newpassword=SQLPivotAdminPass2026!", "--configfile=/samba/etc/smb.conf"])
-    
+
     wait_for_postgres("sql-back")
     wait_for_postgres("sql-front")
-    
+
     run_cmd(["docker", "exec", "-u", "postgres", "sql-back", "psql", "-d", "postgres", "-c", "CREATE TABLE IF NOT EXISTS secret_flag (id SERIAL PRIMARY KEY, flag_val VARCHAR(100));"], check=False)
     run_cmd(["docker", "exec", "-u", "postgres", "sql-back", "psql", "-d", "postgres", "-c", "INSERT INTO secret_flag (flag_val) VALUES ('OSCP{sql_database_link_pivot_won}');"], check=False)
-    
+
     run_cmd(["docker", "exec", "-u", "postgres", "sql-front", "psql", "-d", "postgres", "-c", "CREATE EXTENSION IF NOT EXISTS postgres_fdw;"], check=False)
     run_cmd(["docker", "exec", "-u", "postgres", "sql-front", "psql", "-d", "postgres", "-c", "CREATE SERVER IF NOT EXISTS sql_back_link FOREIGN DATA WRAPPER postgres_fdw OPTIONS (host '10.106.10.20', port '5432', dbname 'postgres');"], check=False)
     run_cmd(["docker", "exec", "-u", "postgres", "sql-front", "psql", "-d", "postgres", "-c", "CREATE USER MAPPING IF NOT EXISTS FOR postgres SERVER sql_back_link OPTIONS (user 'postgres', password 'SuperSecureBackPass2026!');"], check=False)
     run_cmd(["docker", "exec", "-u", "postgres", "sql-front", "psql", "-d", "postgres", "-c", "CREATE FOREIGN TABLE IF NOT EXISTS remote_flag (flag_val VARCHAR(100)) SERVER sql_back_link OPTIONS (schema_name 'public', table_name 'secret_flag');"], check=False)
-    
+
     print_info("Applying anti-cheat network isolation rules to WireGuard gateway...")
     run_cmd(["docker", "exec", "sql-wg-gateway", "iptables", "-A", "FORWARD", "-i", "wg0", "-d", "10.106.10.0/24", "-j", "DROP"], check=False)
 
@@ -549,16 +588,16 @@ def provision_lab8(base_dir, script_path):
     run_cmd(["docker", "cp", os.path.join(base_dir, "labs", "laps-lab", "configure_laps.py"), "laps-dc:/tmp/configure_laps.py"])
     run_cmd(["docker", "exec", "laps-dc", "python3", "/tmp/configure_laps.py"])
     run_cmd(["docker", "exec", "laps-dc", "samba-tool", "user", "setpassword", "Administrator", "--newpassword=LAPSAdminPass2026!", "--configfile=/samba/etc/smb.conf"])
-    
+
     print_info("Exporting Domain Admin keytab from laps-dc...")
     run_cmd(["docker", "exec", "laps-dc", "samba-tool", "domain", "exportkeytab", "/tmp/admin.keytab", "--principal=Administrator@LAPSLAB.LOCAL", "--configfile=/samba/etc/smb.conf"], check=False)
-    
+
     print_info("Obtaining Kerberos ticket cache for Administrator...")
     run_cmd(["docker", "exec", "laps-dc", "kinit", "-k", "-t", "/tmp/admin.keytab", "-c", "/tmp/krb5cc_domain_admin", "Administrator@LAPSLAB.LOCAL"], check=False)
-    
+
     print_info("Copying ticket cache from laps-dc to host...")
     run_cmd(["docker", "cp", "laps-dc:/tmp/krb5cc_domain_admin", "/tmp/krb5cc_domain_admin"], check=False)
-    
+
     print_info("Kerberos ticket cache available on host at /tmp/krb5cc_domain_admin")
 
 def provision_lab9(base_dir, script_path):
@@ -578,7 +617,7 @@ def provision_lab11(base_dir, script_path):
     run_cmd(["docker", "cp", os.path.join(base_dir, "labs", "hybrid-cloud-aad-lab", "configure_hybrid.py"), "hybrid-dc:/tmp/configure_hybrid.py"])
     run_cmd(["docker", "exec", "hybrid-dc", "python3", "/tmp/configure_hybrid.py"])
     run_cmd(["docker", "exec", "hybrid-dc", "samba-tool", "user", "setpassword", "Administrator", "--newpassword=CloudAdminMasterPass2026!", "--configfile=/samba/etc/smb.conf"])
-    
+
     print_info("Configuring Azure AD Connect synchronization server...")
     run_cmd(["docker", "cp", os.path.join(base_dir, "labs", "hybrid-cloud-aad-lab", "setup_sync_server.py"), "hybrid-sync-srv:/tmp/setup_sync_server.py"])
     run_cmd(["docker", "exec", "hybrid-sync-srv", "python3", "/tmp/setup_sync_server.py"])
@@ -589,18 +628,18 @@ def provision_lab12(base_dir, script_path):
     run_cmd(["docker", "cp", os.path.join(base_dir, "labs", "sccm-mecm-pivot-lab", "configure_sccm.py"), "sccm-dc:/tmp/configure_sccm.py"])
     run_cmd(["docker", "exec", "sccm-dc", "python3", "/tmp/configure_sccm.py"])
     run_cmd(["docker", "exec", "sccm-dc", "samba-tool", "user", "setpassword", "Administrator", "--newpassword=ManagementAdminMasterPass2026!", "--configfile=/samba/etc/smb.conf"])
-    
+
     print_info("Waiting for sccm-site-srv initialization and python3...")
     for _ in range(60):
         res = subprocess.run(["docker", "exec", "sccm-site-srv", "which", "python3"], capture_output=True, text=True)
         if res.returncode == 0:
             break
         time.sleep(2)
-    
+
     print_info("Configuring SCCM Site Server & Distribution Point...")
     run_cmd(["docker", "cp", os.path.join(base_dir, "labs", "sccm-mecm-pivot-lab", "setup_site_server.py"), "sccm-site-srv:/tmp/setup_site_server.py"])
     run_cmd(["docker", "exec", "sccm-site-srv", "python3", "/tmp/setup_site_server.py"])
-    
+
     print_info("Configuring WireGuard gateway routing for pivot topology...")
     run_cmd(["docker", "exec", "sccm-wg-gateway", "ip", "route", "replace", "10.112.10.0/24", "via", "10.112.20.254"], check=False)
     print_success("Lab 12 SCCM & network pivot environment provisioned successfully!")
@@ -628,12 +667,12 @@ def get_host_ip(override=None):
     global ACTIVE_HOST_OVERRIDE
     if ACTIVE_HOST_OVERRIDE:
         return ACTIVE_HOST_OVERRIDE
-    
+
     for env_var in ["ADLABS_HOST", "HOST_IP", "SERVER_HOST"]:
         val = os.environ.get(env_var)
         if val and val.strip():
             return val.strip()
-            
+
     config_path = os.path.join(os.path.dirname(os.path.abspath(__file__)), CONFIG_HOST_FILE)
     if os.path.exists(config_path):
         try:
@@ -673,7 +712,7 @@ def auto_update_ip(base_dir, labs_def):
     print_header("Detecting Server IP for Dynamic / Cloud Hosting")
     pub_ip = get_public_ip()
     local_ip = get_host_ip(override="")
-    
+
     config_path = os.path.join(base_dir, CONFIG_HOST_FILE)
     saved_host = None
     if os.path.exists(config_path):
@@ -682,7 +721,7 @@ def auto_update_ip(base_dir, labs_def):
                 saved_host = f.read().strip()
         except Exception:
             pass
-            
+
     if saved_host:
         print_info(f"Previously configured Host: {BOLD}{saved_host}{RESET}")
     print_info(f"Local Interface IP:          {local_ip}")
@@ -692,7 +731,7 @@ def auto_update_ip(base_dir, labs_def):
     else:
         print_warning("Public IP check unreachable. Falling back to Local Interface IP.")
         target = local_ip
-        
+
     set_persistent_host(target, base_dir, labs_def)
 
 def get_docker_used_ports():
@@ -744,13 +783,13 @@ def get_free_subnet(start_x=1):
 def modify_docker_compose(compose_path, host_ip, allocated_port, allocated_subnet):
     with open(compose_path, 'r', encoding='utf-8') as f:
         content = f.read()
-    
+
     content = re.sub(r'-\s*\d+:51820/udp', f'- {allocated_port}:51820/udp', content)
     content = re.sub(r'-\s*SERVERPORT=\d+', f'- SERVERPORT={allocated_port}', content)
     content = re.sub(r'-\s*SERVERURL=[^\s\n]+', f'- SERVERURL={host_ip}', content)
     content = re.sub(r'-\s*INTERNAL_SUBNET=10\.252\.\d+\.0/24', f'- INTERNAL_SUBNET={allocated_subnet}', content)
     content = re.sub(r'ip route add 10\.252\.\d+\.0/24', f'ip route add {allocated_subnet}', content)
-    
+
     with open(compose_path, 'w', encoding='utf-8') as f:
         f.write(content)
 
@@ -760,13 +799,13 @@ def generate_vpn_profile(lab, base_dir, override_host=None):
     if not os.path.exists(compose_path):
         print_error(f"docker-compose.yml not found at {compose_path}")
         return False
-        
+
     with open(compose_path, 'r', encoding='utf-8') as f:
         content = f.read()
-        
+
     port_match = re.search(r'SERVERPORT=(\d+)', content)
     subnet_match = re.search(r'INTERNAL_SUBNET=(10\.252\.\d+\.0/24)', content)
-    
+
     if not port_match or not subnet_match:
         default_port = str(lab.get("vpn_port", "51820")).split("/")[0]
         allocated_port = int(default_port) if default_port.isdigit() else 51820
@@ -777,17 +816,17 @@ def generate_vpn_profile(lab, base_dir, override_host=None):
         allocated_subnet = subnet_match.group(1)
         subnet_prefix = allocated_subnet.split(".0/24")[0]
         allocated_client_ip = f"{subnet_prefix}.2"
-    
+
     host_ip = override_host or get_host_ip()
     print_info(f"Using Host / Endpoint: {host_ip}")
     print_info(f"Using WG Port: {allocated_port}")
     print_info(f"Using WG Subnet: {allocated_subnet} (Client IP: {allocated_client_ip})")
-    
+
     content = re.sub(r'-\s*SERVERURL=[^\s\n]+', f'- SERVERURL={host_ip}', content)
     content = re.sub(r'ip route add 10\.252\.\d+\.0/24', f'ip route add {allocated_subnet}', content)
     with open(compose_path, 'w', encoding='utf-8') as f:
         f.write(content)
-        
+
     success = True
     for wg_src_sub, wg_dest_name in lab["wg"]:
         src_path = os.path.join(base_dir, "labs", lab["dir"], wg_src_sub, "peer1", "peer1.conf")
@@ -798,7 +837,7 @@ def generate_vpn_profile(lab, base_dir, override_host=None):
             print_success(f"Successfully generated client VPN profile at: {dest_path}")
         else:
             success = False
-            
+
     return success
 
 def stop_other_labs(current_lab, labs_def, base_dir):
@@ -807,11 +846,11 @@ def stop_other_labs(current_lab, labs_def, base_dir):
     running_projects = set()
     if res.returncode == 0:
         running_projects = {p.strip().lower() for p in res.stdout.strip().split("\n") if p.strip()}
-        
+
     for lab in labs_def:
         if lab["dir"] == current_lab["dir"]:
             continue
-        
+
         is_running = False
         if lab["dir"].lower() in running_projects:
             is_running = True
@@ -819,7 +858,7 @@ def stop_other_labs(current_lab, labs_def, base_dir):
             check_dc = subprocess.run(["docker", "inspect", "--format", "{{.State.Running}}", lab["dcs"][0]], capture_output=True, text=True)
             if check_dc.returncode == 0 and check_dc.stdout.strip() == "true":
                 is_running = True
-                
+
         if is_running:
             print_warning(f"Conflicting lab '{lab['dir']}' is running. Stopping and cleaning it...")
             os.chdir(os.path.join(base_dir, "labs", lab["dir"]))
@@ -843,7 +882,7 @@ def configure_central_dns(lab, labs_def):
     print_info("Configuring central DNS router container...")
     subprocess.run(["docker", "stop", "adlabs-dns"], capture_output=True)
     subprocess.run(["docker", "rm", "adlabs-dns"], capture_output=True)
-    
+
     cmd = [
         "docker", "run", "-d",
         "--name", "adlabs-dns",
@@ -852,16 +891,16 @@ def configure_central_dns(lab, labs_def):
         "--restart", "always",
         "andyshinn/dnsmasq:latest"
     ]
-    
+
     merged = {}
     for entry in labs_def:
         for domain, ip in entry["dns_mappings"].items():
             merged[domain] = ip
     for domain, ip in merged.items():
         cmd.extend(["--server", f"/{domain}/{ip}"])
-        
+
     cmd.extend(["--server", "8.8.8.8"])
-    
+
     res = subprocess.run(cmd, capture_output=True, text=True)
     if res.returncode != 0:
         print_warning(f"Failed to bind central DNS on port 53: {res.stderr.strip()}")
@@ -871,7 +910,7 @@ def configure_central_dns(lab, labs_def):
         subprocess.run(cmd, capture_output=True)
     else:
         print_success("Central DNS container (adlabs-dns) started on port 53.")
-        
+
     for entry in labs_def:
         for net_name in entry["dns_networks"]:
             actual_net = find_docker_network(entry["dir"], net_name)
@@ -892,7 +931,7 @@ def start_timeout_daemon(lab, base_dir):
         kwargs['creationflags'] = 0x08000000 | 0x00000200
     else:
         kwargs['start_new_session'] = True
-        
+
     try:
         subprocess.Popen(
             [sys.executable, daemon_script,
@@ -915,7 +954,7 @@ def deploy_lab(lab, base_dir, script_path, labs_def, stop_others=True, spawn_dae
     started = time.time()
     total_steps = 6
     print(f"\n{BLUE}{BOLD}╭{'─' * 60}╮{RESET}")
-    print(f"{BLUE}{BOLD}│{RESET} {BOLD}Deploying Lab {lab['index']}/10 ─ {lab['dir']}{RESET}")
+    print(f"{BLUE}{BOLD}│{RESET} {BOLD}Deploying Lab {lab['index']}/{TOTAL_LABS} ─ {lab['dir']}{RESET}")
     print(f"{BLUE}{BOLD}╰{'─' * 60}╯{RESET}")
     if stop_others:
         stop_other_labs(lab, labs_def, base_dir)
@@ -924,9 +963,15 @@ def deploy_lab(lab, base_dir, script_path, labs_def, stop_others=True, spawn_dae
     allocated_port = get_free_udp_port(51820)
     allocated_subnet, allocated_client_ip = get_free_subnet(1)
     print_info(f"Host IP: {host_ip}  |  WG port: {allocated_port}/udp  |  VPN subnet: {allocated_subnet} (client {allocated_client_ip})")
-    
+
     compose_path = os.path.join(base_dir, "labs", lab["dir"], "docker-compose.yml")
     modify_docker_compose(compose_path, host_ip, allocated_port, allocated_subnet)
+    if create_wordlist_for_lab:
+        try:
+            creds_res = create_wordlist_for_lab(base_dir, lab["dir"], randomize=True)
+            print_info(f"Dynamic Wordlists randomized for {lab['dir']} (Active User: {creds_res['user']})")
+        except Exception:
+            pass
     print_step(2, total_steps, "Starting containers")
     os.chdir(os.path.join(base_dir, "labs", lab["dir"]))
     run_cmd(["docker", "compose", "up", "-d"])
@@ -946,6 +991,10 @@ def deploy_lab(lab, base_dir, script_path, labs_def, stop_others=True, spawn_dae
     except SystemExit as e:
         print_error(f"Provisioning failed for {lab['dir']} (exit code {e.code}).")
         return False
+    try:
+        inject_lab_flags(lab, base_dir)
+    except Exception as e:
+        print_warning(f"Could not inject flags for {lab['dir']}: {e}")
     print_step(5, total_steps, "Configuring DNS and VPN profile")
     configure_central_dns(lab, labs_def)
     for wg_src_sub, wg_dest_name in lab["wg"]:
@@ -990,7 +1039,7 @@ def check_container_status(container_name):
         )
         if res.returncode != 0:
             return "MISSING", "red"
-        
+
         output = res.stdout.strip().split()
         status = output[0] if len(output) > 0 else "unknown"
         health = output[1] if len(output) > 1 else "none"
@@ -1053,18 +1102,15 @@ def test_lab_connectivity(lab):
     print(f"  {DIM}Pivoting labs: internal targets show CLOSED until you pivot through a foothold.{RESET}")
     print(f"  {DIM}If a VPN target is CLOSED, connect WireGuard to '{lab['vpn_profile']}' first.{RESET}")
 
-def run_wordlist_generation(base_dir):
-    print_header("Generating / Recreating Wordlists for all labs")
-    wordlist_script = os.path.join(base_dir, "core", "generate_wordlists.py")
-    try:
-        res = subprocess.run([sys.executable, wordlist_script, base_dir], capture_output=True, text=True)
-        if res.returncode == 0:
-            print(res.stdout.strip())
-            print_success("Wordlists generated successfully!")
-        else:
-            print_error(f"Failed to generate wordlists: {res.stderr.strip()}")
-    except Exception as e:
-        print_error(f"Exception raised while running wordlist generator: {e}")
+def run_wordlist_generation(base_dir, randomize=True):
+    print_header("Generating / Recreating Dynamic Wordlists for all labs")
+    if generate_all_wordlists:
+        try:
+            generate_all_wordlists(base_dir, randomize=randomize)
+        except Exception as e:
+            print_error(f"Failed to generate wordlists: {e}")
+    else:
+        print_error("generate_all_wordlists module is unavailable.")
 
 def get_container_ips(container_name):
     try:
@@ -1089,7 +1135,7 @@ def get_lab_runtime_vpn_info(lab, base_dir):
     subnet = "N/A"
     client_ip = "N/A"
     endpoint_ip = get_host_ip()
-    
+
     if os.path.exists(compose_path):
         try:
             with open(compose_path, "r", encoding="utf-8") as f:
@@ -1106,7 +1152,7 @@ def get_lab_runtime_vpn_info(lab, base_dir):
                 endpoint_ip = m_url.group(1)
         except Exception:
             pass
-            
+
     wg_c = lab.get("wg_container")
     if wg_c:
         res_p = subprocess.run(["docker", "port", wg_c, "51820/udp"], capture_output=True, text=True)
@@ -1126,18 +1172,18 @@ def get_lab_status(lab, base_dir):
     wg_c = lab.get("wg_container")
     if wg_c and wg_c not in all_containers:
         all_containers.append(wg_c)
-        
+
     running_count = 0
     total_count = len(all_containers)
     container_statuses = {}
-    
+
     for c in all_containers:
         status, color_name = check_container_status(c)
         ips = get_container_ips(c) if status == "RUNNING" else "-"
         container_statuses[c] = {"status": status, "color": color_name, "ips": ips}
         if status == "RUNNING":
             running_count += 1
-            
+
     if running_count == total_count and total_count > 0:
         overall_status = f"RUNNING ({running_count}/{total_count})"
         overall_color = GREEN
@@ -1150,9 +1196,9 @@ def get_lab_status(lab, base_dir):
         overall_status = f"STOPPED (0/{total_count})"
         overall_color = RED
         status_badge = "STOPPED"
-        
+
     vpn_info = get_lab_runtime_vpn_info(lab, base_dir)
-    
+
     return {
         "status_str": overall_status,
         "color": overall_color,
@@ -1201,7 +1247,7 @@ def show_lab_info(lab, base_dir):
     status_str = info["status_str"]
     col = info["color"]
     vpn = info["vpn"]
-    
+
     print(f"\n{BLUE}{BOLD}╭{'─' * 76}╮{RESET}")
     print(f"{BLUE}{BOLD}│{RESET} {BOLD}LAB {lab['index']}: {lab['dir']}{RESET}")
     print(f"{BLUE}{BOLD}│{RESET}    {CYAN}{lab.get('title', 'Active Directory Lab')}{RESET}")
@@ -1223,7 +1269,29 @@ def show_lab_info(lab, base_dir):
         print(f"\n{GREEN}{BOLD}▸ Initial Foothold Accounts & Targets{RESET}")
         for role, cred in lab["credentials"]:
             print(f"  • {BOLD}{role:<24}{RESET} : {CYAN}{cred}{RESET}")
-            
+
+    if load_lab_credentials:
+        try:
+            active_creds = load_lab_credentials()
+            if lab["dir"] in active_creds:
+                dyn = active_creds[lab["dir"]]
+                print(f"  • {BOLD}{'Active Dynamic User':<24}{RESET} : {CYAN}{dyn['user']}:{dyn['pass']}{RESET} {GREEN}(Dynamic Wordlist){RESET}")
+        except Exception:
+            pass
+
+    if load_flags_db:
+        try:
+            fdb = load_flags_db()
+            if fdb and lab["dir"] in fdb:
+                fdata = fdb[lab["dir"]]
+                loc_st = f"{GREEN}[SOLVED]{RESET}" if fdata["local"]["solved"] else f"{YELLOW}[UNSOLVED]{RESET}"
+                prf_st = f"{GREEN}[SOLVED]{RESET}" if fdata["proof"]["solved"] else f"{YELLOW}[UNSOLVED]{RESET}"
+                print(f"\n{MAGENTA}{BOLD}▸ Lab Flags & Target Objectives{RESET}")
+                print(f"  • Local Flag ({fdata['local']['points']} pts) : {loc_st} {DIM}{fdata['local']['host']} ({fdata['local']['path']}){RESET}")
+                print(f"  • Proof Flag ({fdata['proof']['points']} pts): {prf_st} {DIM}{fdata['proof']['host']} ({fdata['proof']['path']}){RESET}")
+        except Exception:
+            pass
+
     wordlist_u = os.path.join(base_dir, "labs", lab["dir"], "users.txt")
     wordlist_p = os.path.join(base_dir, "labs", lab["dir"], "pass.txt")
     if os.path.exists(wordlist_u) and os.path.exists(wordlist_p):
@@ -1267,7 +1335,7 @@ def connect_wireguard(lab, base_dir):
     if not os.path.exists(conf_path) or os.path.getsize(conf_path) < 10:
         print_info("VPN profile not found or empty. Generating it now...")
         generate_vpn_profile(lab, base_dir)
-        
+
     tunnel_name = os.path.splitext(lab["vpn_profile"])[0]
     print_info(f"Connecting WireGuard tunnel for {lab['dir']} ({tunnel_name})...")
 
@@ -1278,7 +1346,7 @@ def connect_wireguard(lab, base_dir):
             print_info("Please install wireguard-tools (e.g. sudo apt install wireguard-tools)")
             print_info(f"Profile file available at: {conf_path}")
             return False
-            
+
         try:
             os.chmod(conf_path, 0o600)
         except Exception:
@@ -1327,14 +1395,14 @@ def connect_wireguard(lab, base_dir):
         print_error(f"WireGuard executable not found at: {wg_exe}")
         print_info("Please install WireGuard from https://www.wireguard.com/install/")
         return False
-        
+
     is_admin = False
     try:
         import ctypes
         is_admin = (ctypes.windll.shell32.IsUserAnAdmin() != 0)
     except Exception:
         pass
-        
+
     if is_admin:
         subprocess.run([wg_exe, "/uninstalltunnelservice", tunnel_name], capture_output=True, text=True)
         res = subprocess.run([wg_exe, "/installtunnelservice", conf_path], capture_output=True, text=True)
@@ -1371,7 +1439,7 @@ def disconnect_wireguard(lab, base_dir):
     tunnel_name = os.path.splitext(lab["vpn_profile"])[0]
     conf_path = os.path.join(base_dir, "labs", lab["dir"], lab["vpn_profile"])
     print_info(f"Disconnecting WireGuard tunnel '{tunnel_name}'...")
-    
+
     if os.name != 'nt':
         wg_quick = shutil.which("wg-quick")
         if not wg_quick:
@@ -1380,7 +1448,7 @@ def disconnect_wireguard(lab, base_dir):
         use_sudo = os.geteuid() != 0 if hasattr(os, "geteuid") else True
         prefix = ["sudo"] if use_sudo else []
         res = subprocess.run(prefix + ["wg-quick", "down", conf_path], capture_output=True, text=True)
-       
+
         try:
             inspect_res = subprocess.run(["docker", "network", "ls", "--filter", f"label=com.docker.compose.project={lab['dir']}", "-q"], capture_output=True, text=True)
             if inspect_res.returncode == 0 and inspect_res.stdout.strip():
@@ -1412,7 +1480,7 @@ def disconnect_wireguard(lab, base_dir):
         is_admin = (ctypes.windll.shell32.IsUserAnAdmin() != 0)
     except Exception:
         pass
-        
+
     if is_admin:
         res = subprocess.run([wg_exe, "/uninstalltunnelservice", tunnel_name], capture_output=True, text=True)
         if res.returncode == 0:
@@ -1435,6 +1503,249 @@ def disconnect_wireguard(lab, base_dir):
             print_info("You can disconnect via CLI by running:")
             print(f"  {CYAN}.\\disconnect.bat {lab['index']}{RESET}")
             return False
+
+def inject_lab_flags(lab, base_dir):
+    if not load_flags_db:
+        return
+    try:
+        db = load_flags_db()
+        if not db or lab["dir"] not in db:
+            db = init_flags_for_all_labs() if init_flags_for_all_labs else {}
+        flag_info = db.get(lab["dir"])
+        if not flag_info:
+            return
+
+        loc_flag = flag_info["local"]["flag"]
+        prf_flag = flag_info["proof"]["flag"]
+
+        if lab["dir"] == "oscp-network-pivot-lab":
+            run_cmd(["docker", "exec", "perimeter-nginx-ui", "sh", "-c", f"echo '{loc_flag}' > /home/www-data/local.txt && echo '{loc_flag}' > /var/www/local.txt && echo '{prf_flag}' > /root/proof.txt"], check=False)
+            run_cmd(["docker", "exec", "ad-forest-parent", "sh", "-c", f"echo '{prf_flag}' > /root/proof.txt && echo '{prf_flag}' > /samba/proof.txt"], check=False)
+        elif lab.get("dcs"):
+            main_dc = lab["dcs"][0]
+            run_cmd(["docker", "exec", main_dc, "sh", "-c", f"echo '{prf_flag}' > /root/proof.txt && echo '{prf_flag}' > /samba/proof.txt"], check=False)
+
+        for c in lab.get("containers", []):
+            if any(k in c for k in ["target", "srv", "client"]):
+                run_cmd(["docker", "exec", c, "sh", "-c", f"echo '{loc_flag}' > /flag.txt || true"], check=False)
+    except Exception as e:
+        print_warning(f"Flag injection warning for {lab['dir']}: {e}")
+
+def handle_connect_command(lab_arg=None, base_dir=None):
+    if base_dir is None:
+        base_dir = os.path.dirname(os.path.abspath(__file__))
+    if not lab_arg:
+        print_header("WireGuard Cross-Platform VPN Connector")
+        print("\nAvailable Labs:")
+        for lab in labs_def:
+            print(f"  [{lab['index']}] {lab['dir']} - {lab.get('title', '')}")
+        try:
+            choice = input(f"\nEnter lab number (1-{len(labs_def)}) or name to connect: ").strip()
+        except (KeyboardInterrupt, EOFError):
+            print("\nAborted.")
+            return
+        if not choice:
+            print_error("No lab selected.")
+            return
+        lab_arg = choice
+
+    matched = find_lab(labs_def, lab_arg)
+    if matched:
+        connect_wireguard(matched, base_dir)
+    else:
+        print_error(f"Lab '{lab_arg}' not found.")
+
+def handle_disconnect_command(lab_arg=None, base_dir=None):
+    if base_dir is None:
+        base_dir = os.path.dirname(os.path.abspath(__file__))
+    if not lab_arg:
+        print_header("WireGuard Cross-Platform VPN Disconnector")
+        print("\nAvailable Labs:")
+        for lab in labs_def:
+            print(f"  [{lab['index']}] {lab['dir']}")
+        try:
+            choice = input(f"\nEnter lab number (1-{len(labs_def)}) or name to disconnect: ").strip()
+        except (KeyboardInterrupt, EOFError):
+            print("\nAborted.")
+            return
+        if not choice:
+            print_error("No lab selected.")
+            return
+        lab_arg = choice
+
+    matched = find_lab(labs_def, lab_arg)
+    if matched:
+        disconnect_wireguard(matched, base_dir)
+    else:
+        print_error(f"Lab '{lab_arg}' not found.")
+
+def handle_submit_flag(flag_str):
+    if not flag_str or not flag_str.strip():
+        print_error("Please specify a flag string: adlabs submit <flag>")
+        return
+
+    if not submit_flag:
+        print_error("Flag management module is unavailable.")
+        return
+
+    exam = load_exam_session() if load_exam_session else None
+    is_exam = exam and exam.get("status") == "active"
+
+    if is_exam:
+        res = submit_exam_flag(flag_str)
+        if res["status"] == "success":
+            print(f"\n{GREEN}{BOLD}╔══════════════════════════════════════════════════════════════════╗{RESET}")
+            print(f"{GREEN}{BOLD}║                 [✓] EXAM FLAG ACCEPTED!                          ║{RESET}")
+            print(f"{GREEN}{BOLD}╚══════════════════════════════════════════════════════════════════╝{RESET}")
+            print(f"  Target        : {CYAN}{res['target']}{RESET} ({res['type'].upper()} Flag)")
+            print(f"  Points Awarded: {GREEN}+{res['points']} pts{RESET}")
+            print(f"  Total Score   : {YELLOW}{BOLD}{res['total_score']} / 100 pts{RESET} (Passing: 70 pts)")
+            if res["total_score"] >= 70:
+                print(f"\n  {GREEN}{BOLD}🎉 CONGRATULATIONS! YOU HAVE REACHED THE 70-POINT PASSING THRESHOLD! 🎉{RESET}")
+        elif res["status"] == "already_solved":
+            print_warning(f"Flag for {res['target']} ({res['type']}) was already submitted previously.")
+        elif res["status"] == "expired":
+            print_error("Exam session has expired.")
+        else:
+            print_error(f"Incorrect flag: {res.get('message', 'Flag not recognized.')}")
+        return
+
+    res = submit_flag(flag_str)
+    if res["status"] == "success":
+        print(f"\n{GREEN}{BOLD}╔══════════════════════════════════════════════════════════════════╗{RESET}")
+        print(f"{GREEN}{BOLD}║                  [✓] FLAG ACCEPTED!                             ║{RESET}")
+        print(f"{GREEN}{BOLD}╚══════════════════════════════════════════════════════════════════╝{RESET}")
+        print(f"  Lab           : {CYAN}{res['title']}{RESET} ({res['lab']})")
+        print(f"  Type          : {YELLOW}{res['type'].upper()} Flag{RESET}")
+        print(f"  Points Awarded: {GREEN}+{res['points']} pts{RESET}")
+        print(f"  Total Lab Score: {BOLD}{res['total_score']} pts{RESET}")
+    elif res["status"] == "already_solved":
+        print_warning(f"Flag for {res['title']} ({res['type']}) was already submitted at {res['solved_at']}.")
+    else:
+        print_error(f"Invalid flag submitted: {res['flag']}")
+
+def handle_show_hint(lab_arg=None, tier=None):
+    if not get_hints:
+        print_error("Hint system module is unavailable.")
+        return
+
+    exam = load_exam_session() if load_exam_session else None
+    if exam and exam.get("status") == "active":
+        print_warning("OSCP Mock Exam is currently ACTIVE!")
+        print_info("Hints and walkthroughs are disabled during exam conditions to maintain realistic test integrity.")
+        confirm = input(f"{YELLOW}Do you wish to forfeit and stop the exam to view hints? (y/N): {RESET}").strip().lower()
+        if confirm != 'y':
+            return
+        if stop_mock_exam: stop_mock_exam()
+        print_info("Exam forfeited and stopped.")
+
+    if not lab_arg:
+        print_header("Progressive Multi-Tier Hint System")
+        print("\nAvailable Labs for Hints:")
+        for lab in labs_def:
+            print(f"  [{lab['index']}] {lab['dir']} - {lab.get('title', '')}")
+        try:
+            choice = input(f"\nEnter lab number (1-{len(labs_def)}) or name: ").strip()
+        except (KeyboardInterrupt, EOFError):
+            print("\nAborted.")
+            return
+        if not choice:
+            return
+        lab_arg = choice
+
+    meta, hint_result = get_hints(lab_arg, tier=tier)
+    if not meta:
+        print_error(hint_result)
+        return
+
+    print(f"\n{BLUE}{BOLD}╭{'─' * 70}╮{RESET}")
+    print(f"{BLUE}{BOLD}│{RESET} {BOLD}HINTS FOR LAB {meta['index']}: {meta['title']}{RESET}")
+    print(f"{BLUE}{BOLD}╰{'─' * 70}╯{RESET}")
+
+    if isinstance(hint_result, list):
+        for h in hint_result:
+            print(f"\n  {YELLOW}💡 {h}{RESET}")
+        if len(hint_result) < len(meta["hints"]):
+            print(f"\n  {DIM}Run 'adlabs hint {meta['index']}' again to unlock the next progressive hint tier.{RESET}")
+    else:
+        print(f"\n  {YELLOW}💡 {hint_result}{RESET}")
+
+def handle_show_flags():
+    if not load_flags_db:
+        print_error("Flag system module is unavailable.")
+        return
+
+    db = load_flags_db()
+    if not db:
+        db = init_flags_for_all_labs()
+
+    total_score = calculate_score(db)
+    print_header("ADLabs Flag Progress & Scoreboard")
+    print(f"\n  {BOLD}Total Points Earned: {GREEN}{total_score}{RESET} {BOLD}/ 450 pts{RESET}")
+    print(f"\n  {BOLD}{'#':<3} {'Lab Name':<28} {'Local (10p)':<14} {'Proof (30/40p)':<16} {'Score'}{RESET}")
+    print(f"  {DIM}{'─' * 70}{RESET}")
+
+    for name, data in db.items():
+        loc_st = f"{GREEN}[SOLVED]{RESET}" if data["local"]["solved"] else f"{DIM}[PENDING]{RESET}"
+        prf_st = f"{GREEN}[SOLVED]{RESET}" if data["proof"]["solved"] else f"{DIM}[PENDING]{RESET}"
+        pts = 0
+        if data["local"]["solved"]: pts += data["local"]["points"]
+        if data["proof"]["solved"]: pts += data["proof"]["points"]
+        max_p = data["local"]["points"] + data["proof"]["points"]
+        print(f"  {data['index']:<3} {name:<28} {loc_st:<23} {prf_st:<25} {pts}/{max_p}")
+
+def handle_exam_command(sub_cmd=None, args=None):
+    if not get_exam_status:
+        print_error("Mock exam module is unavailable.")
+        return
+
+    if not sub_cmd or sub_cmd == "status":
+        session, status = get_exam_status()
+        if not session:
+            print_info(status)
+            print(f"\n  Start a new 24-hour mock exam with: {CYAN}python adlabs.py exam start{RESET}")
+            return
+
+        status_color = GREEN if session["status"] == "active" else RED
+        print(f"\n{BLUE}{BOLD}╭{'─' * 72}╮{RESET}")
+        print(f"{BLUE}{BOLD}│{RESET} {BOLD}OSCP 24-HOUR MOCK EXAM SESSION{RESET}  [{status_color}{session['status'].upper()}{RESET}]")
+        print(f"{BLUE}{BOLD}│{RESET} Started: {session['started_at']}  |  Time Remaining: {YELLOW}{BOLD}{status['remaining_str']}{RESET}")
+        print(f"{BLUE}{BOLD}│{RESET} Current Score: {YELLOW}{BOLD}{status['score']} / 100 pts{RESET} (Passing: 70 pts)")
+        print(f"{BLUE}{BOLD}╰{'─' * 72}╯{RESET}")
+
+        if status["passed"]:
+            print(f"\n  {GREEN}{BOLD}🏆 PASSING SCORE ACHIEVED! ({status['score']}/100 PTS) 🏆{RESET}")
+
+        print(f"\n  {BOLD}{'Code':<15} {'Role / Subnet':<40} {'Status':<15} {'Points'}{RESET}")
+        print(f"  {DIM}{'─' * 75}{RESET}")
+        for t in session["targets"]:
+            local_st = f"{GREEN}LOCAL[✓]{RESET}" if t["local_solved"] else f"{DIM}LOCAL[-]{RESET}"
+            proof_st = f"{GREEN}PROOF[✓]{RESET}" if t["proof_solved"] else f"{DIM}PROOF[-]{RESET}"
+            st = f"{local_st} {proof_st}"
+            print(f"  {BOLD}{t['code']:<15}{RESET} {t['role']:<40} {st:<25} {t['points_possible']} pts")
+            print(f"    {DIM}Target IP: {t['local_ip']} (Enumerate via WireGuard){RESET}")
+
+        print(f"\n  {CYAN}Commands:{RESET}")
+        print(f"    • Submit flag : {BOLD}python adlabs.py submit <flag>{RESET}")
+        print(f"    • Check status: {BOLD}python adlabs.py exam status{RESET}")
+        print(f"    • Stop / Exit : {BOLD}python adlabs.py exam stop{RESET}")
+
+    elif sub_cmd == "start":
+        ok, res = start_mock_exam(duration_hours=24)
+        if not ok:
+            print_warning(res)
+            return
+        print_success("OSCP Mock Exam started successfully!")
+        handle_exam_command("status")
+
+    elif sub_cmd == "stop":
+        confirm = input(f"{YELLOW}{BOLD}[!] Are you sure you want to stop/forfeit the exam session? (y/n): {RESET}").strip().lower()
+        if confirm == 'y':
+            ok, res = stop_mock_exam()
+            if ok:
+                print_success(f"Exam stopped. Final score: {res['current_score']} / 100 points.")
+            else:
+                print_error(res)
 
 def show_banner(total_labs=None):
     if total_labs is None:
@@ -1461,19 +1772,19 @@ labs_def = [
     {
         "index": 1,
         "dir": "oscp-network-pivot-lab",
-        "title": "OSCP Multi-Tier Network Pivot & Forest Trust",
-        "scenario_focus": "Multi-Tier Pivot & Forest",
-        "scenario": "External DMZ perimeter web app -> PostgreSQL DB -> internal AD Forest Child (HQ.MEGACORP.LOCAL) -> Forest Parent (MEGACORP.LOCAL).",
-        "objective": "Retrieve /var/flag.txt -> read ad_sync_credentials from DB -> pivot to HQ DC -> elevate to Forest Parent DA.",
+        "title": "OSCP Multi-Tier Network Pivot & Full Attack Loop",
+        "scenario_focus": "Web Foothold, PrivEsc, Pivot & AD",
+        "scenario": "External DMZ perimeter web portal (SQLi/File Upload) -> Local PrivEsc -> Internal DB & Redis -> AD Forest Child (HQ.MEGACORP.LOCAL) -> Forest Parent (MEGACORP.LOCAL).",
+        "objective": "Retrieve DMZ local.txt (10 pts) -> root proof.txt (10 pts) -> Pivot to DB/AD -> elevate to Forest Parent DA proof.txt (40 pts).",
         "attack_chain": [
-            "Perimeter Recon: Access Web UI at 10.10.10.80:9000 -> enumerate web files to locate db_settings.conf with DB credentials.",
-            "Database Pivoting: Connect to PostgreSQL (10.20.20.20:5432) -> query ad_sync_credentials table to extract AD bind accounts.",
-            "Child Domain Recon: Authenticate to hq.megacorp.local (10.100.10.20) -> enumerate users and SPNs.",
-            "Kerberoasting / AS-REP Roast: Extract Kerberos tickets for service accounts -> crack offline using generated pass.txt.",
-            "Forest Trust Escalation: Abuse bidirectional forest trust to elevate to Forest Parent DA on 10.100.10.10 and capture /var/flag.txt."
+            "Perimeter Foothold: Access MegaCorp Portal at 10.10.10.80:80 -> exploit SQLi on login or upload PHP webshell via document drop -> obtain www-data shell (local.txt).",
+            "Local Privilege Escalation: Exploit sudo find or writable /opt/internal_backup.py to escalate to root (root proof.txt).",
+            "Internal Network Pivoting: Review /root/pivot_notes.txt -> establish SSH dynamic port forwarding or Chisel tunnel into 10.20.20.0/24 and 10.100.10.0/24.",
+            "Database Credential Hunt: Connect to PostgreSQL (10.20.20.20:5432) -> query ad_sync_credentials table to extract AD bind accounts.",
+            "Active Directory Forest Escalation: AS-REP Roasting / Kerberoasting on HQ DC -> exploit bidirectional forest trust to achieve Enterprise Admin on 10.100.10.10."
         ],
         "credentials": [
-            ("Perimeter Web Access", "Anonymous HTTP at 10.10.10.80:9000"),
+            ("Perimeter Web Portal", "HTTP at 10.10.10.80:80 (Vulnerable: SQLi / File Upload)"),
             ("Target Domains", "megacorp.local / hq.megacorp.local")
         ],
         "dcs": ["ad-forest-parent", "ad-forest-child"],
@@ -1487,8 +1798,9 @@ labs_def = [
         "vpn_profile": "oscp-pivot-lab.conf",
         "containers": ["perimeter-nginx-ui", "internal-postgres-db", "ad-forest-parent", "ad-forest-child"],
         "targets": [
-            {"name": "Perimeter Web UI", "ip": "10.10.10.80", "port": 9000, "protocol": "TCP"},
-            {"name": "Postgres Database", "ip": "10.20.20.20", "port": 5432, "protocol": "TCP"},
+            {"name": "Perimeter Web Portal (DMZ Foothold)", "ip": "10.10.10.80", "port": 80, "protocol": "TCP"},
+            {"name": "Postgres Internal Database", "ip": "10.20.20.20", "port": 5432, "protocol": "TCP"},
+            {"name": "Internal Redis Cache", "ip": "10.20.20.30", "port": 6379, "protocol": "TCP"},
             {"name": "Parent Domain Controller (MEGACORP.LOCAL)", "ip": "10.100.10.10", "port": 445, "protocol": "TCP"},
             {"name": "Child Domain Controller (HQ.MEGACORP.LOCAL)", "ip": "10.100.10.20", "port": 389, "protocol": "TCP"}
         ]
@@ -1867,10 +2179,198 @@ labs_def = [
 
 TOTAL_LABS = len(labs_def)
 
+
+def action_deploy_all(base_dir, script_path, labs_def):
+    """Deploys and provisions all labs in sequence."""
+    results = []
+    ready = []
+    try:
+        for lab in labs_def:
+            ok = deploy_lab(lab, base_dir, script_path, labs_def, stop_others=False, spawn_daemon=False)
+            results.append((f"Lab {lab['index']} {lab['dir']}", "READY" if ok else "FAILED"))
+            if ok:
+                ready.append(lab)
+    except KeyboardInterrupt:
+        print_warning("Interrupted by user. Showing partial results...")
+    for lab in ready:
+        start_timeout_daemon(lab, base_dir)
+    print_summary_box("DEPLOY ALL FINISHED", results)
+    return ready
+
+def action_deploy_single(target, base_dir, script_path, labs_def):
+    """Deploys a single lab by index or directory name."""
+    matched = find_lab(labs_def, target)
+    if matched:
+        return deploy_lab(matched, base_dir, script_path, labs_def, stop_others=False)
+    print_error(f"Lab '{target}' not found.")
+    return False
+
+def action_stop_all(base_dir, labs_def):
+    """Stops all active labs."""
+    for lab in labs_def:
+        stop_lab(lab, base_dir)
+
+def action_stop_single(target, base_dir, labs_def):
+    """Stops a single lab by index or directory name."""
+    matched = find_lab(labs_def, target)
+    if matched:
+        stop_lab(matched, base_dir)
+        return True
+    print_error(f"Lab '{target}' not found.")
+    return False
+
+def action_clean_all(base_dir, labs_def):
+    """Stops and removes volumes for all labs."""
+    for lab in labs_def:
+        clean_lab(lab, base_dir)
+
+def action_clean_single(target, base_dir, labs_def):
+    """Stops and removes volumes for a single lab."""
+    matched = find_lab(labs_def, target)
+    if matched:
+        clean_lab(matched, base_dir)
+        return True
+    print_error(f"Lab '{target}' not found.")
+    return False
+
+def action_test_all(labs_def):
+    """Tests connectivity and service status for all labs."""
+    for lab in labs_def:
+        test_lab_connectivity(lab)
+
+def action_test_single(target, labs_def):
+    """Tests connectivity and service status for a single lab."""
+    matched = find_lab(labs_def, target)
+    if matched:
+        test_lab_connectivity(matched)
+        return True
+    print_error(f"Lab '{target}' not found.")
+    return False
+
+def action_show_info(target, base_dir, labs_def):
+    """Displays detailed configuration, credentials, and targets for labs."""
+    if not target or target.lower() == 'all' or target == '0':
+        for lab in labs_def:
+            show_lab_info(lab, base_dir)
+    else:
+        matched = find_lab(labs_def, target)
+        if matched:
+            show_lab_info(matched, base_dir)
+        else:
+            print_error(f"Lab '{target}' not found.")
+
+def action_gen_vpn(target, base_dir, labs_def):
+    """Generates WireGuard VPN configuration profiles."""
+    if not target or target.lower() == 'all' or target == '0':
+        for lab in labs_def:
+            generate_vpn_profile(lab, base_dir)
+    else:
+        matched = find_lab(labs_def, target)
+        if matched:
+            generate_vpn_profile(matched, base_dir)
+        else:
+            print_error(f"Lab '{target}' not found.")
+
 def main():
     base_dir = os.path.dirname(os.path.abspath(__file__))
     os.chdir(base_dir)
     script_path = os.path.join(base_dir, "core", "configure_ad.py")
+
+    # Subcommand dispatch support (e.g. adlabs connect 1, adlabs submit OSCP{...}, adlabs hint 1, adlabs exam start, adlabs flags)
+    if len(sys.argv) > 1 and not sys.argv[1].startswith("-"):
+        subcmd = sys.argv[1].lower()
+        subargs = sys.argv[2:]
+        subarg1 = subargs[0] if subargs else None
+
+        if subcmd == "connect":
+            show_banner()
+            handle_connect_command(subarg1, base_dir)
+            return
+        elif subcmd == "disconnect":
+            show_banner()
+            handle_disconnect_command(subarg1, base_dir)
+            return
+        elif subcmd == "submit":
+            show_banner()
+            if not subarg1:
+                print_error("Please specify a flag string: adlabs submit <flag>")
+                return
+            handle_submit_flag(subarg1)
+            return
+        elif subcmd == "hint":
+            show_banner()
+            tier_arg = None
+            if len(subargs) > 1 and subargs[1].isdigit():
+                tier_arg = int(subargs[1])
+            handle_show_hint(subarg1, tier=tier_arg)
+            return
+        elif subcmd in ("flags", "scoreboard", "score"):
+            show_banner()
+            handle_show_flags()
+            return
+        elif subcmd in ("exam", "mock-exam"):
+            show_banner()
+            action = subarg1 if subarg1 else "status"
+            handle_exam_command(action, subargs)
+            return
+        elif subcmd in ("status", "ps"):
+            show_banner()
+            show_all_labs_summary(labs_def, base_dir)
+            return
+        elif subcmd == "info":
+            show_banner()
+            target = subarg1 if subarg1 else "all"
+            if target.lower() == 'all':
+                for lab in labs_def:
+                    show_lab_info(lab, base_dir)
+            else:
+                matched = find_lab(labs_def, target)
+                if matched:
+                    show_lab_info(matched, base_dir)
+                else:
+                    print_error(f"Lab '{target}' not found.")
+            return
+        elif subcmd in ("deploy", "start", "up"):
+            if subarg1:
+                if subarg1.lower() == "all":
+                    sys.argv = [sys.argv[0], "--all"]
+                else:
+                    sys.argv = [sys.argv[0], "--lab", subarg1]
+            else:
+                print_error("Please specify lab name or index: adlabs deploy <lab|all>")
+                return
+        elif subcmd in ("stop", "down"):
+            if subarg1:
+                if subarg1.lower() == "all":
+                    sys.argv = [sys.argv[0], "--stop-all"]
+                else:
+                    sys.argv = [sys.argv[0], "--stop", subarg1]
+            else:
+                print_error("Please specify lab name or index: adlabs stop <lab|all>")
+                return
+        elif subcmd == "clean":
+            if subarg1:
+                if subarg1.lower() == "all":
+                    sys.argv = [sys.argv[0], "--clean-all"]
+                else:
+                    sys.argv = [sys.argv[0], "--clean", subarg1]
+            else:
+                print_error("Please specify lab name or index: adlabs clean <lab|all>")
+                return
+        elif subcmd == "test":
+            if subarg1:
+                if subarg1.lower() == "all":
+                    sys.argv = [sys.argv[0], "--test-all"]
+                else:
+                    sys.argv = [sys.argv[0], "--test", subarg1]
+            else:
+                sys.argv = [sys.argv[0], "--test-all"]
+        elif subcmd in ("wordlists", "gen-wordlists"):
+            show_banner()
+            randomize = ("--randomize" in subargs or "-r" in subargs)
+            from core.generate_wordlists import generate_all_wordlists
+            generate_all_wordlists(base_dir, randomize=randomize)
+            return
 
     parser = argparse.ArgumentParser(description=f"Manage AD Labs ({TOTAL_LABS} scenarios) setup, provisioning, and connectivity.")
     parser.add_argument("--all", "-a", action="store_true", help=f"Start and provision all {TOTAL_LABS} labs")
@@ -1886,6 +2386,11 @@ def main():
     parser.add_argument("--connect", "-c", type=str, help=f"Connect WireGuard VPN tunnel for a lab (by name or 1-{TOTAL_LABS} index)")
     parser.add_argument("--disconnect", "-d", type=str, help=f"Disconnect WireGuard VPN tunnel for a lab (by name or 1-{TOTAL_LABS} index)")
     parser.add_argument("--generate-wordlists", action="store_true", help="Generate / Recreate users.txt and pass.txt wordlists for all labs")
+    parser.add_argument("--submit", type=str, help="Submit a captured flag (local.txt or proof.txt)")
+    parser.add_argument("--hint", type=str, help="Request progressive hint for a lab (1-12 or name)")
+    parser.add_argument("--flags", action="store_true", help="Show flag progress and score breakdown")
+    parser.add_argument("--exam", type=str, nargs="?", const="status", help="OSCP Mock Exam simulator (start, status, stop)")
+    parser.add_argument("--randomize", "-r", action="store_true", help="Randomize credentials when generating wordlists")
     parser.add_argument("--gen-vpn", type=str, help="Generate / Regenerate VPN profiles for a lab (or 'all' / index / name)")
     parser.add_argument("--set-host", type=str, help="Set persistent Host IP or DDNS Domain (e.g. '203.0.113.1' or 'myvpn.duckdns.org') and update all profiles")
     parser.add_argument("--update-ip", action="store_true", help="Auto-detect current public/local IP and update all deployed labs")
@@ -1905,7 +2410,7 @@ def main():
 
     if args.list_labs:
         for lab in labs_def:
-            print(f"[{lab['index']}] {lab['dir']}")
+            print(f"[{lab['index']:>2}] {lab['dir']:<28} - {lab.get('title', '')}")
         return
 
     has_args = any([
@@ -1914,7 +2419,8 @@ def main():
         args.connect, args.disconnect,
         args.generate_wordlists, args.gen_vpn,
         args.status, args.info,
-        args.set_host, args.update_ip
+        args.set_host, args.update_ip,
+        args.submit, args.hint, args.flags, args.exam
     ])
 
     if has_args:
@@ -1924,106 +2430,56 @@ def main():
             if not acquire_deploy_lock(base_dir):
                 sys.exit(1)
             atexit.register(release_deploy_lock, base_dir)
-        if args.set_host:
+        if args.submit:
+            handle_submit_flag(args.submit)
+            return
+        elif args.hint:
+            handle_show_hint(args.hint)
+            return
+        elif args.flags:
+            handle_show_flags()
+            return
+        elif args.exam:
+            handle_exam_command(args.exam)
+            return
+        elif args.set_host:
             set_persistent_host(args.set_host, base_dir, labs_def)
             return
         elif args.update_ip:
             auto_update_ip(base_dir, labs_def)
             return
         elif args.all:
-            results = []
-            ready = []
-            try:
-                for lab in labs_def:
-                    ok = deploy_lab(lab, base_dir, script_path, labs_def, stop_others=False, spawn_daemon=False)
-                    results.append((f"Lab {lab['index']} {lab['dir']}", "READY" if ok else "FAILED"))
-                    if ok:
-                        ready.append(lab)
-            except KeyboardInterrupt:
-                print_warning("Interrupted by user. Showing partial results...")
-            for lab in ready:
-                start_timeout_daemon(lab, base_dir)
-            print_summary_box("DEPLOY ALL FINISHED", results)
+            action_deploy_all(base_dir, script_path, labs_def)
         elif args.lab:
-            matched = find_lab(labs_def, args.lab)
-            if matched:
-                if not deploy_lab(matched, base_dir, script_path, labs_def, stop_others=False):
-                    sys.exit(1)
-            else:
-                print_error(f"Lab '{args.lab.strip()}' not found.")
+            if not action_deploy_single(args.lab.strip(), base_dir, script_path, labs_def):
                 sys.exit(1)
         elif args.status:
             show_all_labs_summary(labs_def, base_dir)
         elif args.info:
-            target = args.info.strip()
-            if target.lower() == 'all':
-                for lab in labs_def:
-                    show_lab_info(lab, base_dir)
-            else:
-                matched = find_lab(labs_def, target)
-                if matched:
-                    show_lab_info(matched, base_dir)
-                else:
-                    print_error(f"Lab '{target}' not found.")
-                    sys.exit(1)
+            action_show_info(args.info.strip(), base_dir, labs_def)
         elif args.connect:
-            matched = find_lab(labs_def, args.connect)
-            if matched:
-                connect_wireguard(matched, base_dir)
-            else:
-                print_error(f"Lab '{args.connect.strip()}' not found.")
-                sys.exit(1)
+            handle_connect_command(args.connect.strip(), base_dir)
         elif args.disconnect:
-            matched = find_lab(labs_def, args.disconnect)
-            if matched:
-                disconnect_wireguard(matched, base_dir)
-            else:
-                print_error(f"Lab '{args.disconnect.strip()}' not found.")
-                sys.exit(1)
+            handle_disconnect_command(args.disconnect.strip(), base_dir)
         elif args.stop_all:
-            for lab in labs_def:
-                stop_lab(lab, base_dir)
+            action_stop_all(base_dir, labs_def)
         elif args.stop:
-            matched = find_lab(labs_def, args.stop)
-            if matched:
-                stop_lab(matched, base_dir)
-            else:
-                print_error(f"Lab '{args.stop.strip()}' not found.")
+            if not action_stop_single(args.stop.strip(), base_dir, labs_def):
                 sys.exit(1)
         elif args.clean_all:
-            for lab in labs_def:
-                clean_lab(lab, base_dir)
+            action_clean_all(base_dir, labs_def)
         elif args.clean:
-            matched = find_lab(labs_def, args.clean)
-            if matched:
-                clean_lab(matched, base_dir)
-            else:
-                print_error(f"Lab '{args.clean.strip()}' not found.")
+            if not action_clean_single(args.clean.strip(), base_dir, labs_def):
                 sys.exit(1)
         elif args.test_all:
-            for lab in labs_def:
-                test_lab_connectivity(lab)
+            action_test_all(labs_def)
         elif args.test:
-            matched = find_lab(labs_def, args.test)
-            if matched:
-                test_lab_connectivity(matched)
-            else:
-                print_error(f"Lab '{args.test.strip()}' not found.")
+            if not action_test_single(args.test.strip(), labs_def):
                 sys.exit(1)
         elif args.generate_wordlists:
-            run_wordlist_generation(base_dir)
+            run_wordlist_generation(base_dir, randomize=args.randomize)
         elif args.gen_vpn:
-            target = args.gen_vpn.strip()
-            if target.lower() == 'all':
-                for lab in labs_def:
-                    generate_vpn_profile(lab, base_dir)
-            else:
-                matched = find_lab(labs_def, target)
-                if matched:
-                    generate_vpn_profile(matched, base_dir)
-                else:
-                    print_error(f"Lab '{target}' not found.")
-                    sys.exit(1)
+            action_gen_vpn(args.gen_vpn.strip(), base_dir, labs_def)
         return
 
 
@@ -2045,73 +2501,51 @@ def main():
         print(f"  {BOLD}[11]{RESET} Generate / Recreate wordlists (users.txt & pass.txt) for all labs")
         print(f"  {BOLD}[12]{RESET} Generate / Regenerate VPN profiles (Update Host IP)")
         print(f"  {BOLD}[13]{RESET} Dynamic IP & Server Host Setup (Auto-Detect WAN / Set DDNS Domain)")
-        print(f"  {BOLD}[14]{RESET} Connect WireGuard VPN tunnel for a lab (CLI Import)")
+        print(f"  {BOLD}[14]{RESET} Connect WireGuard VPN tunnel for a lab (Cross-Platform)")
         print(f"  {BOLD}[15]{RESET} Disconnect WireGuard VPN tunnel for a lab")
-        print(f"  {BOLD}[16]{RESET} Exit")
+        print(f"  {BOLD}[16]{RESET} Submit Flag (local.txt or proof.txt)")
+        print(f"  {BOLD}[17]{RESET} Request Progressive Hint for a Lab (Tier 1-4)")
+        print(f"  {BOLD}[18]{RESET} Show Flag Scoreboard & Solved Challenges")
+        print(f"  {BOLD}[19]{RESET} OSCP Mock Exam Simulator (24-Hour Blind Challenge)")
+        print(f"  {BOLD}[20]{RESET} Exit")
         print(f"{CYAN} ──────────────────────────────────────────────────────{RESET}")
-        
-        choice = input(f"{BOLD}Enter choice (1-16): {RESET}").strip()
-        
+
+        choice = input(f"{BOLD}Enter choice (1-20): {RESET}").strip()
+
         if choice == "1":
             confirm = input(f"{YELLOW}{BOLD}[!] Are you sure you want to run all {TOTAL_LABS} labs? This requires significant RAM. (y/n): {RESET}").strip().lower()
             if confirm == 'y':
-                results = []
-                ready = []
-                try:
-                    for lab in labs_def:
-                        ok = deploy_lab(lab, base_dir, script_path, labs_def, stop_others=False, spawn_daemon=False)
-                        results.append((f"Lab {lab['index']} {lab['dir']}", "READY" if ok else "FAILED"))
-                        if ok:
-                            ready.append(lab)
-                except KeyboardInterrupt:
-                    print_warning("Interrupted by user. Showing partial results...")
-                for lab in ready:
-                    start_timeout_daemon(lab, base_dir)
-                print_summary_box("DEPLOY ALL FINISHED", results)
+                action_deploy_all(base_dir, script_path, labs_def)
         elif choice == "2":
             print(f"\n{BOLD}{CYAN}--- Available Labs ---{RESET}")
             for lab in labs_def:
                 print(f"  {BOLD}{lab['index']}){RESET} {lab['dir']}")
             lab_choice = input(f"\n{BOLD}Enter lab index (1-{len(labs_def)}): {RESET}").strip()
-            matched = find_lab(labs_def, lab_choice)
-            if matched:
-                deploy_lab(matched, base_dir, script_path, labs_def, stop_others=False)
-            else:
-                print_error("Invalid selection.")
+            action_deploy_single(lab_choice, base_dir, script_path, labs_def)
             input(f"\nPress Enter to return to main menu...")
         elif choice == "3":
             confirm = input(f"{YELLOW}{BOLD}[!] Are you sure you want to stop all labs? (y/n): {RESET}").strip().lower()
             if confirm == 'y':
-                for lab in labs_def:
-                    stop_lab(lab, base_dir)
+                action_stop_all(base_dir, labs_def)
             input(f"\nPress Enter to return to main menu...")
         elif choice == "4":
             print(f"\n{BOLD}{CYAN}--- Active Labs ---{RESET}")
             for lab in labs_def:
                 print(f"  {BOLD}{lab['index']}){RESET} {lab['dir']}")
             lab_choice = input(f"\n{BOLD}Enter lab index to stop (1-{len(labs_def)}): {RESET}").strip()
-            matched = find_lab(labs_def, lab_choice)
-            if matched:
-                stop_lab(matched, base_dir)
-            else:
-                print_error("Invalid selection.")
+            action_stop_single(lab_choice, base_dir, labs_def)
             input(f"\nPress Enter to return to main menu...")
         elif choice == "5":
             confirm = input(f"{RED}{BOLD}[!] WARNING: This will destroy all databases and AD states for all labs. Proceed? (y/n): {RESET}").strip().lower()
             if confirm == 'y':
-                for lab in labs_def:
-                    clean_lab(lab, base_dir)
+                action_clean_all(base_dir, labs_def)
             input(f"\nPress Enter to return to main menu...")
         elif choice == "6":
             print(f"\n{BOLD}{CYAN}--- Available Labs ---{RESET}")
             for lab in labs_def:
                 print(f"  {BOLD}{lab['index']}){RESET} {lab['dir']}")
             lab_choice = input(f"\n{BOLD}Enter lab index to clean (1-{len(labs_def)}): {RESET}").strip()
-            matched = find_lab(labs_def, lab_choice)
-            if matched:
-                clean_lab(matched, base_dir)
-            else:
-                print_error("Invalid selection.")
+            action_clean_single(lab_choice, base_dir, labs_def)
             input(f"\nPress Enter to return to main menu...")
         elif choice == "7":
             show_all_labs_summary(labs_def, base_dir)
@@ -2122,30 +2556,17 @@ def main():
             for lab in labs_def:
                 print(f"  {BOLD}{lab['index']}){RESET} {lab['dir']}")
             lab_choice = input(f"\n{BOLD}Enter lab index for detailed info (0-{len(labs_def)}): {RESET}").strip()
-            if lab_choice == "0" or lab_choice.lower() == "all":
-                for lab in labs_def:
-                    show_lab_info(lab, base_dir)
-            else:
-                matched = find_lab(labs_def, lab_choice)
-                if matched:
-                    show_lab_info(matched, base_dir)
-                else:
-                    print_error("Invalid selection.")
+            action_show_info(lab_choice, base_dir, labs_def)
             input(f"\nPress Enter to return to main menu...")
         elif choice == "9":
-            for lab in labs_def:
-                test_lab_connectivity(lab)
+            action_test_all(labs_def)
             input(f"\nPress Enter to return to main menu...")
         elif choice == "10":
             print(f"\n{BOLD}{CYAN}--- Available Labs ---{RESET}")
             for lab in labs_def:
                 print(f"  {BOLD}{lab['index']}){RESET} {lab['dir']}")
             lab_choice = input(f"\n{BOLD}Enter lab index to test (1-{len(labs_def)}): {RESET}").strip()
-            matched = find_lab(labs_def, lab_choice)
-            if matched:
-                test_lab_connectivity(matched)
-            else:
-                print_error("Invalid selection.")
+            action_test_single(lab_choice, labs_def)
             input(f"\nPress Enter to return to main menu...")
         elif choice == "11":
             run_wordlist_generation(base_dir)
@@ -2156,15 +2577,7 @@ def main():
             for lab in labs_def:
                 print(f"  {BOLD}{lab['index']}){RESET} {lab['dir']}")
             lab_choice = input(f"\n{BOLD}Enter lab index to generate VPN for (0-{len(labs_def)}): {RESET}").strip()
-            if lab_choice == "0":
-                for lab in labs_def:
-                    generate_vpn_profile(lab, base_dir)
-            else:
-                matched = find_lab(labs_def, lab_choice)
-                if matched:
-                    generate_vpn_profile(matched, base_dir)
-                else:
-                    print_error("Invalid selection.")
+            action_gen_vpn(lab_choice, base_dir, labs_def)
             input(f"\nPress Enter to return to main menu...")
         elif choice == "13":
             print(f"\n{BOLD}{CYAN}--- Dynamic IP & Server Host Configuration ---{RESET}")
@@ -2217,6 +2630,36 @@ def main():
                 print_error("Invalid selection.")
             input(f"\nPress Enter to return to main menu...")
         elif choice == "16":
+            flag_input = input(f"\n{BOLD}Enter captured flag (OSCP{{...}}): {RESET}").strip()
+            if flag_input:
+                handle_submit_flag(flag_input)
+            input(f"\nPress Enter to return to main menu...")
+        elif choice == "17":
+            print(f"\n{BOLD}{CYAN}--- Available Labs for Hints ---{RESET}")
+            for lab in labs_def:
+                print(f"  {BOLD}{lab['index']}){RESET} {lab['dir']}")
+            lab_choice = input(f"\n{BOLD}Enter lab index (1-{len(labs_def)}): {RESET}").strip()
+            if lab_choice:
+                handle_show_hint(lab_choice)
+            input(f"\nPress Enter to return to main menu...")
+        elif choice == "18":
+            handle_show_flags()
+            input(f"\nPress Enter to return to main menu...")
+        elif choice == "19":
+            print(f"\n{BOLD}{CYAN}--- OSCP Mock Exam Simulator ---{RESET}")
+            print(f"  {BOLD}[1]{RESET} View Active Exam Status & Remaining Time")
+            print(f"  {BOLD}[2]{RESET} Start New 24-Hour Mock Exam (Blind Challenges)")
+            print(f"  {BOLD}[3]{RESET} Stop / Forfeit Current Exam Session")
+            print(f"  {BOLD}[4]{RESET} Return to main menu")
+            sub_e = input(f"\n{BOLD}Enter choice (1-4): {RESET}").strip()
+            if sub_e == "1":
+                handle_exam_command("status")
+            elif sub_e == "2":
+                handle_exam_command("start")
+            elif sub_e == "3":
+                handle_exam_command("stop")
+            input(f"\nPress Enter to return to main menu...")
+        elif choice == "20":
             print_info("Exiting...")
             break
         else:

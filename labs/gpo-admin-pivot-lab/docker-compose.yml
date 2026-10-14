@@ -78,15 +78,26 @@ services:
     container_name: gpo-client-sim
     privileged: true
     restart: unless-stopped
+    environment:
+      - WINRM_HOSTNAME=GPO-WKSTN01
+      - WINRM_DOMAIN=GPOLAB.LOCAL
+      - WINRM_IP=10.104.20.20
+      - WINRM_GATEWAY=10.104.20.254
+      - WINRM_USERS=domain_admin:GPOLabAdminPass2026!,l5_operator:OperatorPass2026!
+      - WINRM_FLAG=OSCP{gpo_workstation_local_access}
+      - WINRM_ADMIN_FLAG=OSCP{gpo_workstation_pivot_achieved}
     volumes:
       - gpo-samba-rw:/sysvol
+      - ../../core/winrm_server.py:/tmp/winrm_server.py:ro
     command: >
-      bash -c "apt-get update && apt-get install -y --no-install-recommends iproute2 procps &&
+      bash -c "apt-get update && apt-get install -y --no-install-recommends iproute2 procps python3 python3-flask &&
                (ip route add 10.252.1.0/24 via 10.104.20.150 || true) &&
+               echo 'OSCP{gpo_workstation_local_access}' > /flag.txt &&
                echo 'OSCP{gpo_workstation_pivot_achieved}' > /root/flag.txt &&
                mkdir -p /var/log &&
                echo 'Backup task completed by domain_admin:GPOLabAdminPass2026!' > /var/log/backup.log &&
-               echo 'Workstation agent started. Waiting for policy script...' &&
+               echo 'Workstation agent started. Starting WinRM service...' &&
+               (python3 /tmp/winrm_server.py &) &&
                sleep 30 &&
                while true; do
                  if [ -f /sysvol/sysvol/gpolab.local/scripts/update.sh ]; then

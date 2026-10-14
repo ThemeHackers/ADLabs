@@ -29,10 +29,10 @@ def main():
         m = Message()
         m.dn = Dn(samdb, user_dn)
         print("Message object created", flush=True)
-        
+
         m["userAccountControl"] = MessageElement(str(args.uac), FLAG_MOD_REPLACE, "userAccountControl")
         print("MessageElement added", flush=True)
-        
+
         print("Modifying database...", flush=True)
         samdb.modify(m)
         print(f"Successfully modified userAccountControl for {args.username} to {args.uac} on {root_dn}", flush=True)

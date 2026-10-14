@@ -38,3 +38,5 @@ logs/*
 output/*
 !output/.gitkeep
 !output/vpn/.gitkeep
+.adlabs_host
+adlabs.lock

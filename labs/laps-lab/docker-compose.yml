@@ -82,10 +82,21 @@ services:
     privileged: true
     cap_add:
       - NET_ADMIN
+    environment:
+      - WINRM_HOSTNAME=FINANCE-SRV01
+      - WINRM_DOMAIN=LAPSLAB.LOCAL
+      - WINRM_IP=10.107.20.20
+      - WINRM_GATEWAY=10.107.20.254
+      - WINRM_USERS=Administrator:FinanceSrvLocalAdminPass2026!
+      - WINRM_FLAG=OSCP{laps_leaked_credentials_access}
+      - WINRM_ADMIN_FLAG=OSCP{laps_local_admin_full_compromise}
+    volumes:
+      - ../../core/winrm_server.py:/tmp/winrm_server.py:ro
     command: >
-      sh -c "apt-get update && apt-get install -y --no-install-recommends iproute2 procps python3 openssh-server &&
+      sh -c "apt-get update && apt-get install -y --no-install-recommends iproute2 procps python3 python3-flask openssh-server &&
             (ip route add 10.107.10.0/24 via 10.107.20.254 || true) &&
             echo 'OSCP{laps_leaked_credentials_access}' > /flag.txt &&
+            echo 'OSCP{laps_local_admin_full_compromise}' > /root/flag.txt &&
             mkdir -p /var/www &&
             echo 'Finance Portal' > /var/www/index.html &&
             (id -u Administrator >/dev/null 2>&1 || useradd -m -s /bin/bash Administrator) &&
@@ -93,6 +104,7 @@ services:
             mkdir -p /var/run/sshd &&
             sed -i 's/#PasswordAuthentication yes/PasswordAuthentication yes/' /etc/ssh/sshd_config &&
             (/usr/sbin/sshd || true) &&
+            (python3 /tmp/winrm_server.py &) &&
             cd /var/www &&
             python3 -m http.server 80"
     networks:

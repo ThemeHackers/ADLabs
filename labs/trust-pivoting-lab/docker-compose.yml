@@ -139,13 +139,21 @@ services:
     privileged: true
     cap_add:
       - NET_ADMIN
+    environment:
+      - WINRM_HOSTNAME=FORESTB-WS01
+      - WINRM_DOMAIN=FORESTB.LOCAL
+      - WINRM_IP=10.103.20.30
+      - WINRM_GATEWAY=10.103.20.254
+      - WINRM_USERS=j.forestb:ForestBUserPass2026!,Administrator:ForestBAdminPass2026!
+      - WINRM_FLAG=OSCP{winrm_lateral_movement_forestb_pwned}
+      - WINRM_ADMIN_FLAG=OSCP{cross_forest_trust_full_compromise}
     command: >
       sh -c "apt-get update && apt-get install -y iproute2 procps &&
              ip route add 10.103.10.0/24 via 10.103.20.254 || true &&
              pip install pywinrm flask --quiet &&
              python3 /tmp/winrm_server.py"
     volumes:
-      - ./winrm_server.py:/tmp/winrm_server.py
+      - ../../core/winrm_server.py:/tmp/winrm_server.py:ro
     networks:
       forestb-net: { ipv4_address: 10.103.20.30 }
     restart: unless-stopped

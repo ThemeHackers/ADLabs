@@ -1,2 +1,2 @@
 @echo off
-call "%~dp0scripts\windows\disconnect.bat" %*
+python "%~dp0adlabs.py" disconnect %*

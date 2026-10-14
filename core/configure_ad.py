@@ -135,14 +135,14 @@ def main():
         create_user_if_not_exists(samdb, u_doe, "SimplePass2026!", args.realm)
 
         if prefix == "l1_":
-          
+
             svcb_sid, _ = get_object_sid(samdb, f"sAMAccountName={u_backups}")
             _, svcd_dn = get_object_sid(samdb, f"sAMAccountName={u_delegate}")
             if svcb_sid and svcd_dn:
                 grant_ace_on_object(samdb, svcd_dn, svcb_sid, security.SEC_GENERIC_WRITE)
                 print(f"ACL: {u_backups} has GenericWrite over {u_delegate} (Lab 1 Exploit Chain)", flush=True)
         elif prefix == "l5_":
-        
+
             operator_sid, _ = get_object_sid(samdb, "sAMAccountName=l5_operator")
             adminsdh_dn = Dn(samdb, f"CN=AdminSDHolder,CN=System,{domain_dn}")
             if operator_sid and adminsdh_dn:

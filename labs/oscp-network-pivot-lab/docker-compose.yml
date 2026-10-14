@@ -47,11 +47,19 @@ services:
       server-net:     { ipv4_address: 10.20.20.254 }
       ad-forest-net:  { ipv4_address: 10.100.10.254 }
 
-  perimeter-nginx-ui:
-    image: uozi/nginx-ui:latest
+  perimeter-web-srv:
+    image: php:8.1-apache
     container_name: perimeter-nginx-ui
-    environment:
-      - NGINX_UI_MAINTAINER=admin
+    privileged: true
+    cap_add:
+      - NET_ADMIN
+    volumes:
+      - ./perimeter-app:/var/www/html
+      - ./perimeter-app/setup_perimeter.sh:/tmp/setup_perimeter.sh:ro
+    command: >
+      bash -c "chmod +x /tmp/setup_perimeter.sh &&
+               /tmp/setup_perimeter.sh &&
+               apache2-foreground"
     networks:
       dmz-net: { ipv4_address: 10.10.10.80 }
     restart: unless-stopped
