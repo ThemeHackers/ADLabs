@@ -100,20 +100,25 @@ python adlabs.py --clean-all
 
 ### 3. Connect via WireGuard
 
-Each deployment generates a client VPN profile in the lab directory (e.g., `rbcd-lab/oscp-rbcd-lab.conf`).
+Each deployment generates a client VPN profile in the lab directory (e.g., `labs/rbcd-lab/oscp-rbcd-lab.conf`) as well as in the centralized `output/vpn/` directory.
 
 #### Option A: One-Click CLI Import & Connect (Recommended)
 You can directly import and manage WireGuard tunnels via CLI without using the GUI:
 
 ```powershell
-# Connect / Import via batch script (triggers UAC elevation automatically):
+# Windows: Connect / Import via batch script (triggers UAC elevation automatically):
 .\connect.bat 6
 
-# Or connect via Python CLI (Run in Administrator Terminal):
+# Linux: Connect via shell script (uses wg-quick with sudo):
+./scripts/linux/connect.sh 6
+
+# Or connect via Python CLI:
 python adlabs.py --connect 6
 
 # Disconnect when finished:
 .\disconnect.bat 6
+# Linux:
+./scripts/linux/disconnect.sh 6
 # Or:
 python adlabs.py --disconnect 6
 ```
@@ -121,7 +126,7 @@ python adlabs.py --disconnect 6
 #### Option B: Manual GUI Import
 1. Open the WireGuard Windows application.
 2. Click **Import tunnel(s) from file** (`Ctrl + O`).
-3. Select the `.conf` file from the target lab folder (e.g., `rbcd-lab/oscp-rbcd-lab.conf`).
+3. Select the `.conf` file from either `output/vpn/` or the target lab folder (e.g., `labs/rbcd-lab/oscp-rbcd-lab.conf`).
 4. Click **Activate**.
 
 > [!TIP]
@@ -140,18 +145,18 @@ To prevent collisions, each lab utilizes dedicated subnets, domain names, and Wi
 
 | # | Lab Directory | Domain / Realm | Target Subnets | Default Port | VPN Profile |
 | :-: | :--- | :--- | :--- | :-: | :--- |
-| **1** | [`oscp-network-pivot-lab`](./oscp-network-pivot-lab/) | `MEGACORP.LOCAL`<br>`HQ.MEGACORP.LOCAL` | `10.10.10.0/24` (DMZ)<br>`10.20.20.0/24` (Internal)<br>`10.100.10.0/24` (AD) | `51820/udp` | `oscp-pivot-lab.conf` |
-| **2** | [`multi-domain-forest-lab`](./multi-domain-forest-lab/) | `MEGACORP.LOCAL`<br>`HQ.MEGACORP.LOCAL`<br>`CYBERTECH.LOCAL` | `10.101.10.0/24` (Parent)<br>`10.101.20.0/24` (Child)<br>`10.101.30.0/24` (Tree) | `51821/udp` | `oscp-forest.conf` |
-| **3** | [`adcs-abuse-lab`](./adcs-abuse-lab/) | `ADCSLAB.LOCAL` | `10.102.10.0/24` (AD)<br>`10.102.20.0/24` (CA Web) | `51822/udp` | `oscp-adcs-lab.conf` |
-| **4** | [`trust-pivoting-lab`](./trust-pivoting-lab/) | `FORESTA.LOCAL`<br>`FORESTB.LOCAL` | `10.103.10.0/24` (Forest A)<br>`10.103.20.0/24` (Forest B) | `51823/udp` | `oscp-trust-lab.conf` |
-| **5** | [`gpo-admin-pivot-lab`](./gpo-admin-pivot-lab/) | `GPOLAB.LOCAL` | `10.104.10.0/24` (AD)<br>`10.104.20.0/24` (Client) | `51824/udp` | `oscp-gpo-lab.conf` |
-| **6** | [`rbcd-lab`](./rbcd-lab/) | `RBCDLAB.LOCAL` | `10.105.10.0/24` (AD)<br>`10.105.20.0/24` (Server) | `51825/udp` | `oscp-rbcd-lab.conf` |
-| **7** | [`sql-pivot-lab`](./sql-pivot-lab/) | `SQLPIVOT.LOCAL` | `10.106.10.0/24` (AD)<br>`10.106.20.0/24` (SQL) | `51826/udp` | `oscp-sql-lab.conf` |
-| **8** | [`laps-lab`](./laps-lab/) | `LAPSLAB.LOCAL` | `10.107.10.0/24` (AD)<br>`10.107.20.0/24` (Server) | `51827/udp` | `oscp-laps-lab.conf` |
-| **9** | [`esc8-relay-lab`](./esc8-relay-lab/) | `ESC8LAB.LOCAL` | `10.108.10.0/24` (AD)<br>`10.108.20.0/24` (Web) | `51828/udp` | `oscp-esc8-lab.conf` |
-| **10** | [`delegation-s4u-lab`](./delegation-s4u-lab/) | `DELEGATELAB.LOCAL` | `10.109.10.0/24` (AD)<br>`10.109.20.0/24` (DB) | `51829/udp` | `oscp-deleg.conf` |
-| **11** | [`hybrid-cloud-aad-lab`](./hybrid-cloud-aad-lab/) | `MEGACORP-CLOUD.LOCAL` | `10.110.10.0/24` (AD)<br>`10.110.20.0/24` (Sync) | `51830/udp` | `oscp-hybrid.conf` |
-| **12** | [`sccm-mecm-pivot-lab`](./sccm-mecm-pivot-lab/) | `CORP-MANAGEMENT.LOCAL` | `10.112.10.0/24` (AD)<br>`10.112.20.0/24` (Mgmt) | `51831/udp` | `oscp-sccm-lab.conf` |
+| **1** | [`oscp-network-pivot-lab`](./labs/oscp-network-pivot-lab/) | `MEGACORP.LOCAL`<br>`HQ.MEGACORP.LOCAL` | `10.10.10.0/24` (DMZ)<br>`10.20.20.0/24` (Internal)<br>`10.100.10.0/24` (AD) | `51820/udp` | `oscp-pivot-lab.conf` |
+| **2** | [`multi-domain-forest-lab`](./labs/multi-domain-forest-lab/) | `MEGACORP.LOCAL`<br>`HQ.MEGACORP.LOCAL`<br>`CYBERTECH.LOCAL` | `10.101.10.0/24` (Parent)<br>`10.101.20.0/24` (Child)<br>`10.101.30.0/24` (Tree) | `51821/udp` | `oscp-forest.conf` |
+| **3** | [`adcs-abuse-lab`](./labs/adcs-abuse-lab/) | `ADCSLAB.LOCAL` | `10.102.10.0/24` (AD)<br>`10.102.20.0/24` (CA Web) | `51822/udp` | `oscp-adcs-lab.conf` |
+| **4** | [`trust-pivoting-lab`](./labs/trust-pivoting-lab/) | `FORESTA.LOCAL`<br>`FORESTB.LOCAL` | `10.103.10.0/24` (Forest A)<br>`10.103.20.0/24` (Forest B) | `51823/udp` | `oscp-trust-lab.conf` |
+| **5** | [`gpo-admin-pivot-lab`](./labs/gpo-admin-pivot-lab/) | `GPOLAB.LOCAL` | `10.104.10.0/24` (AD)<br>`10.104.20.0/24` (Client) | `51824/udp` | `oscp-gpo-lab.conf` |
+| **6** | [`rbcd-lab`](./labs/rbcd-lab/) | `RBCDLAB.LOCAL` | `10.105.10.0/24` (AD)<br>`10.105.20.0/24` (Server) | `51825/udp` | `oscp-rbcd-lab.conf` |
+| **7** | [`sql-pivot-lab`](./labs/sql-pivot-lab/) | `SQLPIVOT.LOCAL` | `10.106.10.0/24` (AD)<br>`10.106.20.0/24` (SQL) | `51826/udp` | `oscp-sql-lab.conf` |
+| **8** | [`laps-lab`](./labs/laps-lab/) | `LAPSLAB.LOCAL` | `10.107.10.0/24` (AD)<br>`10.107.20.0/24` (Server) | `51827/udp` | `oscp-laps-lab.conf` |
+| **9** | [`esc8-relay-lab`](./labs/esc8-relay-lab/) | `ESC8LAB.LOCAL` | `10.108.10.0/24` (AD)<br>`10.108.20.0/24` (Web) | `51828/udp` | `oscp-esc8-lab.conf` |
+| **10** | [`delegation-s4u-lab`](./labs/delegation-s4u-lab/) | `DELEGATELAB.LOCAL` | `10.109.10.0/24` (AD)<br>`10.109.20.0/24` (DB) | `51829/udp` | `oscp-deleg.conf` |
+| **11** | [`hybrid-cloud-aad-lab`](./labs/hybrid-cloud-aad-lab/) | `MEGACORP-CLOUD.LOCAL` | `10.110.10.0/24` (AD)<br>`10.110.20.0/24` (Sync) | `51830/udp` | `oscp-hybrid.conf` |
+| **12** | [`sccm-mecm-pivot-lab`](./labs/sccm-mecm-pivot-lab/) | `CORP-MANAGEMENT.LOCAL` | `10.112.10.0/24` (AD)<br>`10.112.20.0/24` (Mgmt) | `51831/udp` | `oscp-sccm-lab.conf` |
 
 ---
 

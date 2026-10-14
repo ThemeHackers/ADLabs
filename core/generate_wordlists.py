@@ -38,7 +38,7 @@ def create_wordlist_for_lab(base_dir, lab_name, credentials):
     random.shuffle(all_users)
     all_passes = [correct_pass] + generate_similar_passwords(50)
     random.shuffle(all_passes)
-    lab_dir = Path(base_dir) / lab_name
+    lab_dir = Path(base_dir) / "labs" / lab_name
     lab_dir.mkdir(parents=True, exist_ok=True)
     with open(lab_dir / "users.txt", "w", encoding="utf-8") as f:
         f.write("\n".join(all_users) + "\n")

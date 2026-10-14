@@ -8,6 +8,7 @@ import re
 import atexit
 import json
 import urllib.request
+import shutil
 
 CONFIG_HOST_FILE = ".adlabs_host"
 ACTIVE_HOST_OVERRIDE = None
@@ -275,13 +276,25 @@ def process_wg_config(src_path, dest_path, host_ip, allocated_port, allocated_cl
             
     with open(dest_path, "w") as f:
         f.writelines(filtered)
+    try:
+        base_dir = os.path.dirname(os.path.abspath(__file__))
+        central_vpn = os.path.join(base_dir, "output", "vpn")
+        os.makedirs(central_vpn, exist_ok=True)
+        shutil.copy2(dest_path, os.path.join(central_vpn, os.path.basename(dest_path)))
+    except Exception:
+        pass
     print_success(f"Processed and wrote: {dest_path} (Endpoint={host_ip}:{allocated_port}, Address={allocated_client_ip})")
     return True
 
 def process_generated_creds(src_container, dest_dir):
     os.makedirs(dest_dir, exist_ok=True)
     cred_host_path = os.path.join(dest_dir, "credentials.txt")
-    run_cmd(["docker", "cp", f"{src_container}:/tmp/credentials_generated.txt", cred_host_path])
+    if os.path.exists(cred_host_path):
+        try:
+            os.remove(cred_host_path)
+        except Exception:
+            pass
+    run_cmd(["docker", "cp", f"{src_container}:/tmp/credentials_generated.txt", cred_host_path], check=False)
     
     if os.path.exists(cred_host_path):
         with open(cred_host_path, "r") as f:
@@ -330,7 +343,7 @@ def provision_lab1(base_dir, script_path):
     run_cmd(["docker", "cp", script_path, "ad-forest-child:/tmp/configure_ad.py"])
     practice_users_l1 = "j.smith r.jones m.brown t.taylor d.miller j.wilson b.moore s.taylor a.anderson k.thomas c.jackson m.white l.harris e.martin r.clark s.lewis g.robinson j.walker k.young p.allen"
     run_cmd(["docker", "exec", "ad-forest-child", "python3", "/tmp/configure_ad.py", "--role", "child", "--realm", "HQ.MEGACORP.LOCAL", "--practice-users", practice_users_l1, "--user-prefix", "l1_"])
-    process_generated_creds("ad-forest-child", os.path.join(base_dir, "oscp-network-pivot-lab", "oscp_exam_assets"))
+    process_generated_creds("ad-forest-child", os.path.join(base_dir, "labs", "oscp-network-pivot-lab", "oscp_exam_assets"))
     
     print_info("Applying anti-cheat network isolation rules to WireGuard gateway...")
     run_cmd(["docker", "exec", "oscp-wg-gateway", "iptables", "-I", "FORWARD", "-i", "wg0", "-d", "10.20.20.20", "-p", "tcp", "--dport", "5432", "-j", "ACCEPT"], check=False)
@@ -346,7 +359,7 @@ def provision_lab2(base_dir, script_path):
     run_cmd(["docker", "cp", script_path, "mega-dc-child:/tmp/configure_ad.py"])
     practice_users_l2 = "j.doe a.smith b.gates l.torvalds s.jobs"
     run_cmd(["docker", "exec", "mega-dc-child", "python3", "/tmp/configure_ad.py", "--role", "child", "--realm", "HQ.MEGACORP.LOCAL", "--practice-users", practice_users_l2, "--user-prefix", "l2_"])
-    process_generated_creds("mega-dc-child", os.path.join(base_dir, "multi-domain-forest-lab"))
+    process_generated_creds("mega-dc-child", os.path.join(base_dir, "labs", "multi-domain-forest-lab"))
     run_cmd(["docker", "cp", script_path, "mega-dc-tree:/tmp/configure_ad.py"])
     run_cmd(["docker", "exec", "mega-dc-tree", "python3", "/tmp/configure_ad.py", "--role", "tree", "--realm", "CYBERTECH.LOCAL", "--user-prefix", "l2_"])
 
@@ -506,13 +519,13 @@ def provision_lab5(base_dir, script_path):
 
 def provision_lab6(base_dir, script_path):
     print_header("Provisioning Lab 6 (rbcd-lab)")
-    run_cmd(["docker", "cp", os.path.join(base_dir, "rbcd-lab", "configure_rbcd.py"), "rbcd-dc:/tmp/configure_rbcd.py"])
+    run_cmd(["docker", "cp", os.path.join(base_dir, "labs", "rbcd-lab", "configure_rbcd.py"), "rbcd-dc:/tmp/configure_rbcd.py"])
     run_cmd(["docker", "exec", "rbcd-dc", "python3", "/tmp/configure_rbcd.py"])
     run_cmd(["docker", "exec", "rbcd-dc", "samba-tool", "user", "setpassword", "Administrator", "--newpassword=RBCDAccessAdminPass2026!", "--configfile=/samba/etc/smb.conf"])
 
 def provision_lab7(base_dir, script_path):
     print_header("Provisioning Lab 7 (sql-pivot-lab)")
-    run_cmd(["docker", "cp", os.path.join(base_dir, "sql-pivot-lab", "configure_sql.py"), "sql-dc:/tmp/configure_sql.py"])
+    run_cmd(["docker", "cp", os.path.join(base_dir, "labs", "sql-pivot-lab", "configure_sql.py"), "sql-dc:/tmp/configure_sql.py"])
     run_cmd(["docker", "exec", "sql-dc", "python3", "/tmp/configure_sql.py"])
     run_cmd(["docker", "exec", "sql-dc", "samba-tool", "user", "setpassword", "Administrator", "--newpassword=SQLPivotAdminPass2026!", "--configfile=/samba/etc/smb.conf"])
     
@@ -533,7 +546,7 @@ def provision_lab7(base_dir, script_path):
 
 def provision_lab8(base_dir, script_path):
     print_header("Provisioning Lab 8 (laps-lab)")
-    run_cmd(["docker", "cp", os.path.join(base_dir, "laps-lab", "configure_laps.py"), "laps-dc:/tmp/configure_laps.py"])
+    run_cmd(["docker", "cp", os.path.join(base_dir, "labs", "laps-lab", "configure_laps.py"), "laps-dc:/tmp/configure_laps.py"])
     run_cmd(["docker", "exec", "laps-dc", "python3", "/tmp/configure_laps.py"])
     run_cmd(["docker", "exec", "laps-dc", "samba-tool", "user", "setpassword", "Administrator", "--newpassword=LAPSAdminPass2026!", "--configfile=/samba/etc/smb.conf"])
     
@@ -550,30 +563,30 @@ def provision_lab8(base_dir, script_path):
 
 def provision_lab9(base_dir, script_path):
     print_header("Provisioning Lab 9 (esc8-relay-lab)")
-    run_cmd(["docker", "cp", os.path.join(base_dir, "esc8-relay-lab", "configure_esc8.py"), "esc8-dc:/tmp/configure_esc8.py"])
+    run_cmd(["docker", "cp", os.path.join(base_dir, "labs", "esc8-relay-lab", "configure_esc8.py"), "esc8-dc:/tmp/configure_esc8.py"])
     run_cmd(["docker", "exec", "esc8-dc", "python3", "/tmp/configure_esc8.py"])
     run_cmd(["docker", "exec", "esc8-dc", "samba-tool", "user", "setpassword", "Administrator", "--newpassword=ESC8AdminPass2026!", "--configfile=/samba/etc/smb.conf"])
 
 def provision_lab10(base_dir, script_path):
     print_header("Provisioning Lab 10 (delegation-s4u-lab)")
-    run_cmd(["docker", "cp", os.path.join(base_dir, "delegation-s4u-lab", "configure_delegation.py"), "deleg-dc:/tmp/configure_delegation.py"])
+    run_cmd(["docker", "cp", os.path.join(base_dir, "labs", "delegation-s4u-lab", "configure_delegation.py"), "deleg-dc:/tmp/configure_delegation.py"])
     run_cmd(["docker", "exec", "deleg-dc", "python3", "/tmp/configure_delegation.py"])
     run_cmd(["docker", "exec", "deleg-dc", "samba-tool", "user", "setpassword", "Administrator", "--newpassword=DelegationAdminPass2026!", "--configfile=/samba/etc/smb.conf"])
 
 def provision_lab11(base_dir, script_path):
     print_header("Provisioning Lab 11 (hybrid-cloud-aad-lab)")
-    run_cmd(["docker", "cp", os.path.join(base_dir, "hybrid-cloud-aad-lab", "configure_hybrid.py"), "hybrid-dc:/tmp/configure_hybrid.py"])
+    run_cmd(["docker", "cp", os.path.join(base_dir, "labs", "hybrid-cloud-aad-lab", "configure_hybrid.py"), "hybrid-dc:/tmp/configure_hybrid.py"])
     run_cmd(["docker", "exec", "hybrid-dc", "python3", "/tmp/configure_hybrid.py"])
     run_cmd(["docker", "exec", "hybrid-dc", "samba-tool", "user", "setpassword", "Administrator", "--newpassword=CloudAdminMasterPass2026!", "--configfile=/samba/etc/smb.conf"])
     
     print_info("Configuring Azure AD Connect synchronization server...")
-    run_cmd(["docker", "cp", os.path.join(base_dir, "hybrid-cloud-aad-lab", "setup_sync_server.py"), "hybrid-sync-srv:/tmp/setup_sync_server.py"])
+    run_cmd(["docker", "cp", os.path.join(base_dir, "labs", "hybrid-cloud-aad-lab", "setup_sync_server.py"), "hybrid-sync-srv:/tmp/setup_sync_server.py"])
     run_cmd(["docker", "exec", "hybrid-sync-srv", "python3", "/tmp/setup_sync_server.py"])
     print_success("Lab 11 hybrid cloud environment provisioned successfully!")
 
 def provision_lab12(base_dir, script_path):
     print_header("Provisioning Lab 12 (sccm-mecm-pivot-lab)")
-    run_cmd(["docker", "cp", os.path.join(base_dir, "sccm-mecm-pivot-lab", "configure_sccm.py"), "sccm-dc:/tmp/configure_sccm.py"])
+    run_cmd(["docker", "cp", os.path.join(base_dir, "labs", "sccm-mecm-pivot-lab", "configure_sccm.py"), "sccm-dc:/tmp/configure_sccm.py"])
     run_cmd(["docker", "exec", "sccm-dc", "python3", "/tmp/configure_sccm.py"])
     run_cmd(["docker", "exec", "sccm-dc", "samba-tool", "user", "setpassword", "Administrator", "--newpassword=ManagementAdminMasterPass2026!", "--configfile=/samba/etc/smb.conf"])
     
@@ -585,7 +598,7 @@ def provision_lab12(base_dir, script_path):
         time.sleep(2)
     
     print_info("Configuring SCCM Site Server & Distribution Point...")
-    run_cmd(["docker", "cp", os.path.join(base_dir, "sccm-mecm-pivot-lab", "setup_site_server.py"), "sccm-site-srv:/tmp/setup_site_server.py"])
+    run_cmd(["docker", "cp", os.path.join(base_dir, "labs", "sccm-mecm-pivot-lab", "setup_site_server.py"), "sccm-site-srv:/tmp/setup_site_server.py"])
     run_cmd(["docker", "exec", "sccm-site-srv", "python3", "/tmp/setup_site_server.py"])
     
     print_info("Configuring WireGuard gateway routing for pivot topology...")
@@ -650,7 +663,7 @@ def set_persistent_host(new_host, base_dir, labs_def):
     print_info("Updating all WireGuard VPN client profiles and compose configurations...")
     count = 0
     for lab in labs_def:
-        compose_path = os.path.join(base_dir, lab["dir"], "docker-compose.yml")
+        compose_path = os.path.join(base_dir, "labs", lab["dir"], "docker-compose.yml")
         if os.path.exists(compose_path):
             generate_vpn_profile(lab, base_dir, override_host=new_host)
             count += 1
@@ -743,7 +756,7 @@ def modify_docker_compose(compose_path, host_ip, allocated_port, allocated_subne
 
 def generate_vpn_profile(lab, base_dir, override_host=None):
     print_header(f"Generating/Regenerating VPN Profile for {lab['dir']}")
-    compose_path = os.path.join(base_dir, lab["dir"], "docker-compose.yml")
+    compose_path = os.path.join(base_dir, "labs", lab["dir"], "docker-compose.yml")
     if not os.path.exists(compose_path):
         print_error(f"docker-compose.yml not found at {compose_path}")
         return False
@@ -777,8 +790,8 @@ def generate_vpn_profile(lab, base_dir, override_host=None):
         
     success = True
     for wg_src_sub, wg_dest_name in lab["wg"]:
-        src_path = os.path.join(base_dir, lab["dir"], wg_src_sub, "peer1", "peer1.conf")
-        dest_path = os.path.join(base_dir, lab["dir"], wg_dest_name)
+        src_path = os.path.join(base_dir, "labs", lab["dir"], wg_src_sub, "peer1", "peer1.conf")
+        dest_path = os.path.join(base_dir, "labs", lab["dir"], wg_dest_name)
         if not os.path.exists(src_path):
             continue
         if process_wg_config(src_path, dest_path, host_ip, allocated_port, allocated_client_ip):
@@ -809,7 +822,7 @@ def stop_other_labs(current_lab, labs_def, base_dir):
                 
         if is_running:
             print_warning(f"Conflicting lab '{lab['dir']}' is running. Stopping and cleaning it...")
-            os.chdir(os.path.join(base_dir, lab["dir"]))
+            os.chdir(os.path.join(base_dir, "labs", lab["dir"]))
             subprocess.run(["docker", "compose", "down"], capture_output=True)
             os.chdir(base_dir)
             print_success(f"Lab {lab['dir']} has stopped.")
@@ -883,7 +896,7 @@ def start_timeout_daemon(lab, base_dir):
     try:
         subprocess.Popen(
             [sys.executable, daemon_script,
-             "--lab-dir", os.path.join(base_dir, lab["dir"]),
+             "--lab-dir", os.path.join(base_dir, "labs", lab["dir"]),
              "--wg-container", lab["wg_container"],
              "--timeout", "7200",
              "--idle-timeout", "900"],
@@ -912,10 +925,10 @@ def deploy_lab(lab, base_dir, script_path, labs_def, stop_others=True, spawn_dae
     allocated_subnet, allocated_client_ip = get_free_subnet(1)
     print_info(f"Host IP: {host_ip}  |  WG port: {allocated_port}/udp  |  VPN subnet: {allocated_subnet} (client {allocated_client_ip})")
     
-    compose_path = os.path.join(base_dir, lab["dir"], "docker-compose.yml")
+    compose_path = os.path.join(base_dir, "labs", lab["dir"], "docker-compose.yml")
     modify_docker_compose(compose_path, host_ip, allocated_port, allocated_subnet)
     print_step(2, total_steps, "Starting containers")
-    os.chdir(os.path.join(base_dir, lab["dir"]))
+    os.chdir(os.path.join(base_dir, "labs", lab["dir"]))
     run_cmd(["docker", "compose", "up", "-d"])
     os.chdir(base_dir)
     for container in lab["containers"]:
@@ -936,8 +949,8 @@ def deploy_lab(lab, base_dir, script_path, labs_def, stop_others=True, spawn_dae
     print_step(5, total_steps, "Configuring DNS and VPN profile")
     configure_central_dns(lab, labs_def)
     for wg_src_sub, wg_dest_name in lab["wg"]:
-        src_path = os.path.join(base_dir, lab["dir"], wg_src_sub, "peer1", "peer1.conf")
-        dest_path = os.path.join(base_dir, lab["dir"], wg_dest_name)
+        src_path = os.path.join(base_dir, "labs", lab["dir"], wg_src_sub, "peer1", "peer1.conf")
+        dest_path = os.path.join(base_dir, "labs", lab["dir"], wg_dest_name)
         process_wg_config(src_path, dest_path, host_ip, allocated_port, allocated_client_ip)
     print_step(6, total_steps, "Starting auto-timeout daemon")
     if spawn_daemon:
@@ -945,7 +958,7 @@ def deploy_lab(lab, base_dir, script_path, labs_def, stop_others=True, spawn_dae
     print_summary_box(f"Lab {lab['index']} READY ─ {lab['dir']}", [
         ("WG endpoint", f"{host_ip}:{allocated_port}/udp"),
         ("VPN client IP", allocated_client_ip),
-        ("VPN profile", os.path.join(lab["dir"], lab["vpn_profile"])),
+        ("VPN profile", os.path.join("labs", lab["dir"], lab["vpn_profile"])),
         ("Targets", f"{len(lab['targets'])} services"),
         ("Deploy time", format_duration(time.time() - started)),
     ])
@@ -955,7 +968,7 @@ def deploy_lab(lab, base_dir, script_path, labs_def, stop_others=True, spawn_dae
 def stop_lab(lab, base_dir):
     print(f"\n{YELLOW}{BOLD}■ Stopping lab: {lab['dir']}...{RESET}")
     stop_central_dns()
-    os.chdir(os.path.join(base_dir, lab["dir"]))
+    os.chdir(os.path.join(base_dir, "labs", lab["dir"]))
     run_cmd(["docker", "compose", "down"])
     os.chdir(base_dir)
     print_success(f"Lab {lab['dir']} has stopped.")
@@ -963,7 +976,7 @@ def stop_lab(lab, base_dir):
 def clean_lab(lab, base_dir):
     print(f"\n{RED}{BOLD}■ Cleaning lab (removing volumes): {lab['dir']}...{RESET}")
     stop_central_dns()
-    os.chdir(os.path.join(base_dir, lab["dir"]))
+    os.chdir(os.path.join(base_dir, "labs", lab["dir"]))
     run_cmd(["docker", "compose", "down", "-v"])
     os.chdir(base_dir)
     print_success(f"Lab {lab['dir']} has been cleaned.")
@@ -1071,7 +1084,7 @@ def get_container_ips(container_name):
     return "-"
 
 def get_lab_runtime_vpn_info(lab, base_dir):
-    compose_path = os.path.join(base_dir, lab["dir"], "docker-compose.yml")
+    compose_path = os.path.join(base_dir, "labs", lab["dir"], "docker-compose.yml")
     port = lab.get("vpn_port", "51820/UDP")
     subnet = "N/A"
     client_ip = "N/A"
@@ -1105,7 +1118,7 @@ def get_lab_runtime_vpn_info(lab, base_dir):
         "port": port,
         "subnet": subnet,
         "client_ip": client_ip,
-        "profile_path": os.path.join(lab["dir"], lab["vpn_profile"])
+        "profile_path": os.path.join("labs", lab["dir"], lab["vpn_profile"])
     }
 
 def get_lab_status(lab, base_dir):
@@ -1211,10 +1224,10 @@ def show_lab_info(lab, base_dir):
         for role, cred in lab["credentials"]:
             print(f"  • {BOLD}{role:<24}{RESET} : {CYAN}{cred}{RESET}")
             
-    wordlist_u = os.path.join(base_dir, lab["dir"], "users.txt")
-    wordlist_p = os.path.join(base_dir, lab["dir"], "pass.txt")
+    wordlist_u = os.path.join(base_dir, "labs", lab["dir"], "users.txt")
+    wordlist_p = os.path.join(base_dir, "labs", lab["dir"], "pass.txt")
     if os.path.exists(wordlist_u) and os.path.exists(wordlist_p):
-        print(f"  • {DIM}Generated Wordlists   : {os.path.join(lab['dir'], 'users.txt')}, pass.txt{RESET}")
+        print(f"  • {DIM}Generated Wordlists   : {os.path.join('labs', lab['dir'], 'users.txt')}, pass.txt{RESET}")
 
     print(f"\n{CYAN}{BOLD}▸ Containers & IP Addresses{RESET}")
     print(f"  {BOLD}{'Container':<25} {'Status':<18} {'Docker IP':<18}{RESET}")
@@ -1250,20 +1263,39 @@ def show_lab_info(lab, base_dir):
     print(f"  {DIM}Note: Closed targets on internal IPs (10.x.x.x) require connecting via WireGuard first.{RESET}\n")
 
 def connect_wireguard(lab, base_dir):
-    wg_exe = r"C:\Program Files\WireGuard\wireguard.exe"
-    if not os.path.exists(wg_exe):
-        print_error(f"WireGuard executable not found at: {wg_exe}")
-        print_info("Please install WireGuard from https://www.wireguard.com/install/")
-        return False
-        
-    conf_path = os.path.join(base_dir, lab["dir"], lab["vpn_profile"])
+    conf_path = os.path.join(base_dir, "labs", lab["dir"], lab["vpn_profile"])
     if not os.path.exists(conf_path) or os.path.getsize(conf_path) < 10:
         print_info("VPN profile not found or empty. Generating it now...")
         generate_vpn_profile(lab, base_dir)
         
     tunnel_name = os.path.splitext(lab["vpn_profile"])[0]
     print_info(f"Connecting WireGuard tunnel for {lab['dir']} ({tunnel_name})...")
-    
+
+    if os.name != 'nt':
+        wg_quick = shutil.which("wg-quick")
+        if not wg_quick:
+            print_error("wg-quick command not found.")
+            print_info("Please install wireguard-tools (e.g. sudo apt install wireguard-tools)")
+            print_info(f"Profile file available at: {conf_path}")
+            return False
+        use_sudo = os.geteuid() != 0 if hasattr(os, "geteuid") else True
+        prefix = ["sudo"] if use_sudo else []
+        subprocess.run(prefix + ["wg-quick", "down", conf_path], capture_output=True)
+        res = subprocess.run(prefix + ["wg-quick", "up", conf_path], capture_output=True, text=True)
+        if res.returncode == 0:
+            print_success(f"WireGuard tunnel '{tunnel_name}' connected successfully via wg-quick!")
+            show_lab_info(lab, base_dir)
+            return True
+        else:
+            print_error(f"Failed to connect: {res.stderr.strip() or res.stdout.strip()}")
+            return False
+
+    wg_exe = r"C:\Program Files\WireGuard\wireguard.exe"
+    if not os.path.exists(wg_exe):
+        print_error(f"WireGuard executable not found at: {wg_exe}")
+        print_info("Please install WireGuard from https://www.wireguard.com/install/")
+        return False
+        
     is_admin = False
     try:
         import ctypes
@@ -1304,10 +1336,26 @@ def connect_wireguard(lab, base_dir):
             return False
 
 def disconnect_wireguard(lab, base_dir):
-    wg_exe = r"C:\Program Files\WireGuard\wireguard.exe"
     tunnel_name = os.path.splitext(lab["vpn_profile"])[0]
+    conf_path = os.path.join(base_dir, "labs", lab["dir"], lab["vpn_profile"])
     print_info(f"Disconnecting WireGuard tunnel '{tunnel_name}'...")
     
+    if os.name != 'nt':
+        wg_quick = shutil.which("wg-quick")
+        if not wg_quick:
+            print_error("wg-quick command not found.")
+            return False
+        use_sudo = os.geteuid() != 0 if hasattr(os, "geteuid") else True
+        prefix = ["sudo"] if use_sudo else []
+        res = subprocess.run(prefix + ["wg-quick", "down", conf_path], capture_output=True, text=True)
+        if res.returncode == 0:
+            print_success(f"WireGuard tunnel '{tunnel_name}' disconnected successfully.")
+            return True
+        else:
+            print_error(f"Failed to disconnect: {res.stderr.strip() or res.stdout.strip()}")
+            return False
+
+    wg_exe = r"C:\Program Files\WireGuard\wireguard.exe"
     is_admin = False
     try:
         import ctypes
@@ -1535,7 +1583,7 @@ labs_def = [
         "objective": "Write msDS-AllowedToActOnBehalfOfOtherIdentity on srv-target$ -> S4U2self impersonation -> root shell via SSH.",
         "attack_chain": [
             "Unauthenticated Recon: Execute AS-REP Roasting against RBCDLAB.LOCAL for target l6_j.intern (Pre-authentication disabled).",
-            "Offline Hash Cracking: Crack AS-REP hash with rbcd-lab/pass.txt -> obtain password InternPass2026!.",
+            "Offline Hash Cracking: Crack AS-REP hash with labs/rbcd-lab/pass.txt -> obtain password InternPass2026!.",
             "ACL BloodHound Pivot: l6_j.intern has GenericAll over service account l6_svc_web_rbcd -> reset password via RPC/LDAP.",
             "RBCD / Delegation Abuse: l6_svc_web_rbcd has GenericWrite on ws-corp$ -> configure msDS-AllowedToActOnBehalfOfOtherIdentity.",
             "S4U Ticket Forging: Execute S4U2Self and S4U2Proxy to impersonate Administrator -> gain root access on srv-target$."
