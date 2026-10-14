@@ -5,10 +5,11 @@
 [![Python](https://img.shields.io/badge/Python-3.8%2B-3776AB?logo=python&logoColor=white)](https://www.python.org/)
 [![WireGuard](https://img.shields.io/badge/VPN-WireGuard-88171A?logo=wireguard&logoColor=white)](https://www.wireguard.com/)
 [![Labs](https://img.shields.io/badge/Labs-12%20Scenarios-brightgreen)](#lab-scenarios--attack-vectors)
+[![OSCP](https://img.shields.io/badge/OSCP%20Mock%20Exam-24h%20Simulator-orange)](#oscp-mock-exam-simulator)
 
-A lightweight, containerized Active Directory laboratory suite designed for **OSCP (PEN-200)**, **OSCP+**, and enterprise red team preparation.
+A lightweight, containerized Active Directory laboratory suite engineered specifically for **OSCP (PEN-200)**, **OSCP+**, and enterprise red team preparation.
 
-ADLabs replaces resource-intensive Windows Virtual Machines with Samba Active Directory Domain Controllers, Debian routers, and dedicated WireGuard VPN gateways running entirely inside Docker containers.
+ADLabs replaces heavy, resource-draining Windows Virtual Machines with Samba Active Directory Domain Controllers, Debian routers, authentic web application footholds, WinRM simulation services, and dedicated WireGuard VPN gateways running entirely inside Docker containers.
 
 ---
 
@@ -20,12 +21,15 @@ ADLabs replaces resource-intensive Windows Virtual Machines with Samba Active Di
 
 ## Highlights
 
-- **12 Practical Scenarios**: Hands-on coverage of modern AD attack primitives, from Kerberos abuse to AD CS exploitation, Azure AD Connect sync abuse, and SCCM/MECM network pivoting.
-- **Lightweight Footprint**: Operates without Windows licensing or heavy hypervisors; each DC runs within ~60–90 MB of memory.
-- **Network Isolation**: Every lab runs on dedicated, non-overlapping Docker bridge subnets connected through software routers and isolated WireGuard gateways.
-- **Zero Python Dependencies**: The orchestration CLI (`adlabs.py`) runs out-of-the-box using the Python standard library.
+- **12 Comprehensive Scenarios**: Real-world Active Directory attack paths covering Kerberos abuse, AD CS exploitation (ESC1/ESC8), LAPS abuse, Cross-Forest External Trusts, Azure AD Connect sync extraction, and SCCM/MECM network pivoting.
+- **Full OSCP Exam Kill Chain**: Lab 1 (`oscp-network-pivot-lab`) features an authentic DMZ perimeter web portal with SQLi and unrestricted file upload, low-privilege `www-data` shell (`local.txt`), local privilege escalation to `root` (`proof.txt`), credential discovery, and SSH/Chisel pivoting into the internal Active Directory forest.
+- **24-Hour Blind OSCP Mock Exam**: Built-in exam mode that selects random target environments with anonymized identifiers (`TARGET-ALPHA`, `TARGET-BRAVO`, etc.), tracks real-time scores against a 70/100 point passing threshold, and enforces exam-condition hint locks.
+- **Dynamic Wordlists & Credential Randomization**: Prevents credential memorization by dynamically generating realistic corporate usernames and passwords across all labs using customizable patterns.
+- **Flag Verification & Progressive Hint Engine**: Automated submission and scoring for `local.txt` and `proof.txt` flags, accompanied by a 4-tier progressive hint system (Recon $\rightarrow$ Foothold $\rightarrow$ PrivEsc $\rightarrow$ Pivot/AD).
+- **Multi-Lab WinRM Services**: Built-in WSMAN/SOAP WinRM services on port `5985` allowing realistic remote management and credential testing with **Evil-WinRM** and **NetExec (CrackMapExec)**.
+- **Cross-Platform Routing**: Centralized VPN tunnel management via CLI (`adlabs connect` / `adlabs disconnect`) on both Linux and Windows.
+- **Lightweight Footprint**: Zero hypervisor overhead; each Samba DC requires only ~60–90 MB of memory.
 - **Auto-Timeout Daemon**: Automatically halts idle containers after 15 minutes of inactivity or 2 hours of total runtime to prevent resource exhaustion.
-- **Dynamic Port & IP Allocation**: Automatically scans for free host UDP ports (starting at `51820/udp`) and VPN client addresses (`10.252.x.2`) to eliminate port conflicts.
 
 ---
 
@@ -39,109 +43,174 @@ Ensure the following tools are installed on your host machine before starting:
 | :--- | :--- | :--- |
 | **Docker Engine** | 20.10+ | Docker Desktop on Windows/macOS or Docker Engine on Linux |
 | **Docker Compose** | v2.0+ | Compose plugin (`docker compose`) |
-| **Python** | 3.8+ | Standard library only (no `pip install` required) |
+| **Python** | 3.8+ | Standard `python3` runtime |
 | **WireGuard Client** | Latest | [Windows](https://www.wireguard.com/install/) \| [Linux (`wireguard-tools`)](https://www.wireguard.com/install/) \| [macOS](https://apps.apple.com/app/wireguard/id1451685025) |
 
 ### Recommended Attacking Tools
 
-Access the lab targets through your WireGuard connection using standard pentesting toolsets (e.g., Kali Linux or WSL2):
+Access lab targets through your WireGuard connection using standard pentesting toolsets (e.g., Kali Linux or WSL2):
 
 - **Impacket** (`GetUserSPNs.py`, `GetNPUsers.py`, `secretsdump.py`, `getST.py`, `rbcd.py`)
+- **NetExec / CrackMapExec** (`nxc smb`, `nxc winrm`, `nxc ldap`)
+- **Evil-WinRM** (for Windows Remote Management shell access)
 - **Certipy** (for AD CS enumeration and PKINIT authentication)
-- **BloodHound / BloodHound.py** (for graph-based permission mapping)
-- **NetExec / CrackMapExec** (for credential spraying and SMB/WinRM validation)
+- **BloodHound / BloodHound.py** (for Active Directory permission graph mapping)
+- **Chisel / SSH** (for multi-tier subnet pivoting and port forwarding)
 - **Coercer / PetitPotam / PrinterBug** (for authentication coercion)
+
+---
+
+## Installation & Setup
+
+You can run ADLabs directly using the Python standard library, or install it as a package for a clean system-wide `adlabs` command.
+
+### Option 1: Quick Install (Recommended)
+
+Clone the repository and install dependencies in editable mode:
+
+```bash
+git clone https://github.com/ThemeHackers/ADLabs.git
+cd ADLabs
+
+# Install optional dependencies and CLI entry point
+pip install -e .
+```
+
+After installation, the `adlabs` command is directly available anywhere in your terminal.
+
+### Option 2: Standalone Execution
+
+Run directly with `python3` without installing:
+
+```bash
+python3 adlabs.py
+```
 
 ---
 
 ## Quick Start
 
-### 1. Interactive Menu
+### 1. Interactive Dashboard
 
 Launch the interactive terminal dashboard:
 
 ```bash
-python adlabs.py
+python3 adlabs.py
+# Or with installed package:
+adlabs
 ```
 
-Choose any option between `[1]` and `[13]` to deploy individual labs, deploy all labs simultaneously, inspect live status overview (`[7]`), view detailed lab info & credentials (`[8]`), test connectivity, or generate wordlists.
+The interactive menu allows you to deploy labs, manage VPN tunnels, submit flags, view progressive hints, inspect live status, or launch the 24-hour mock exam simulator.
 
 ### 2. Command Line Interface (CLI)
 
-Deploy and manage labs directly with flags:
+ADLabs supports intuitive subcommands and standard flags:
 
 ```bash
-# Check live status overview of all 10 labs
-python adlabs.py --status
+# Check status overview of all 12 labs
+python3 adlabs.py status
 
-# Inspect comprehensive info, credentials, and targets for a specific lab
-python adlabs.py --info 1
-# Or inspect all labs:
-python adlabs.py --info all
+# Deploy a specific lab (e.g., Lab 1)
+python3 adlabs.py deploy 1
 
-# Deploy a single lab (e.g., Lab 1)
-python adlabs.py --lab 1
+# Inspect detailed info, initial credentials, and network targets
+python3 adlabs.py info 1
 
-# Deploy all 10 labs at once
-python adlabs.py --all
+# Connect WireGuard tunnel for a lab (Cross-platform)
+python3 adlabs.py connect 1
 
-# Test connectivity and container health
-python adlabs.py --test 1
-python adlabs.py --test-all
+# Disconnect active WireGuard tunnel
+python3 adlabs.py disconnect
 
-# Stop a running lab (preserves volume state)
-python adlabs.py --stop 1
-python adlabs.py --stop-all
+# Submit a captured flag
+python3 adlabs.py submit OSCP{foothold_perimeter_breached}
 
-# Completely wipe containers and volumes for a clean reset
-python adlabs.py --clean 1
-python adlabs.py --clean-all
+# View flags progress and scoreboard
+python3 adlabs.py flags
+
+# Request progressive hint for a lab (Tier 1-4)
+python3 adlabs.py hint 1
+
+# Start or check the 24-Hour OSCP Mock Exam
+python3 adlabs.py exam start
+python3 adlabs.py exam status
+python3 adlabs.py exam stop
+
+# Stop or clean a lab
+python3 adlabs.py stop 1
+python3 adlabs.py clean 1
 ```
 
-### 3. Connect via WireGuard
+---
 
-Each deployment generates a client VPN profile in the lab directory (e.g., `labs/rbcd-lab/oscp-rbcd-lab.conf`) as well as in the centralized `output/vpn/` directory.
+## WireGuard VPN Connectivity
 
-#### Option A: One-Click CLI Import & Connect (Recommended)
-You can directly import and manage WireGuard tunnels via CLI without using the GUI:
+Every lab deployment automatically allocates a dedicated, collision-free WireGuard port (`51820–51831/udp`) and subnet (`10.252.x.0/24`), generating client VPN profiles in `labs/<lab_name>/<profile>.conf` and `output/vpn/`.
 
-```powershell
-# Windows: Connect / Import via batch script (triggers UAC elevation automatically):
-.\connect.bat 6
+### Method A: One-Click CLI Connect (Recommended)
 
-# Linux: Connect via shell script (uses wg-quick with sudo):
-./scripts/linux/connect.sh 6
+```bash
+# Connect to Lab 1
+python3 adlabs.py connect 1
 
-# Or connect via Python CLI:
-python adlabs.py --connect 6
-
-# Disconnect when finished:
-.\disconnect.bat 6
-# Linux:
-./scripts/linux/disconnect.sh 6
-# Or:
-python adlabs.py --disconnect 6
+# Disconnect
+python3 adlabs.py disconnect
 ```
 
-#### Option B: Manual GUI Import
-1. Open the WireGuard Windows application.
-2. Click **Import tunnel(s) from file** (`Ctrl + O`).
-3. Select the `.conf` file from either `output/vpn/` or the target lab folder (e.g., `labs/rbcd-lab/oscp-rbcd-lab.conf`).
+On Linux, `adlabs connect` invokes `sudo wg-quick up`. On Windows, it automatically prompts for UAC elevation to install the tunnel service.
+
+### Method B: Native Script Helpers
+
+- **Linux**: `./scripts/linux/connect.sh 1` (Disconnect: `./scripts/linux/disconnect.sh 1`)
+- **Windows**: `.\connect.bat 1` (Disconnect: `.\disconnect.bat 1`)
+
+### Method C: WireGuard GUI Client
+
+1. Open the WireGuard application.
+2. Click **Add Tunnel** / **Import tunnel(s) from file** (`Ctrl + O`).
+3. Select the generated `.conf` file from `output/vpn/` (or the lab folder).
 4. Click **Activate**.
 
 > [!TIP]
-> **Host IP Changes**: If your host machine changes networks (e.g., switches Wi-Fi or DHCP leases), regenerate the WireGuard profile without redeploying the lab:
+> **Dynamic WAN & Cloud Hosting**: If running ADLabs on a cloud VPS or dynamic IP home lab, automatically detect your public IP or configure a DDNS domain:
 > ```bash
-> python adlabs.py --gen-vpn 1
-> # Or regenerate profiles for all labs:
-> python adlabs.py --gen-vpn all
+> python3 adlabs.py --update-ip
+> # Or set a static IP / domain:
+> python3 adlabs.py --set-host mylab.duckdns.org
 > ```
+
+---
+
+## OSCP Mock Exam Simulator
+
+ADLabs includes a 24-hour blind exam engine designed to recreate realistic OSCP exam conditions:
+
+- **Blind Challenges**: Targets are assigned anonymous codes (`TARGET-ALPHA`, `TARGET-BRAVO`, `TARGET-CHARLIE`) without revealing the underlying vulnerability or attack chain.
+- **Passing Threshold**: Calculated based on standard OSCP scoring (70 / 100 points required to pass).
+  - External Foothold (`local.txt`): 10 points
+  - Local Privilege Escalation (`proof.txt`): 10 points
+  - Active Directory Domain Compromise (`proof.txt`): 40 points
+- **Exam Integrity**: Progressive hints and walkthroughs are locked during active exam sessions to maintain test authenticity.
+
+```bash
+# Start a new 24-hour session
+python3 adlabs.py exam start
+
+# Check remaining time and current score
+python3 adlabs.py exam status
+
+# Submit flag during exam
+python3 adlabs.py submit OSCP{...}
+
+# Stop / forfeit exam
+python3 adlabs.py exam stop
+```
 
 ---
 
 ## Lab Architecture & Network Mapping
 
-To prevent collisions, each lab utilizes dedicated subnets, domain names, and WireGuard host ports:
+To prevent port conflicts and cross-contamination, each lab runs on isolated subnets with dedicated WireGuard endpoints:
 
 | # | Lab Directory | Domain / Realm | Target Subnets | Default Port | VPN Profile |
 | :-: | :--- | :--- | :--- | :-: | :--- |
@@ -162,23 +231,29 @@ To prevent collisions, each lab utilizes dedicated subnets, domain names, and Wi
 
 ## Lab Scenarios & Attack Vectors
 
-### Lab 1: Network Pivoting & Multi-Tier Foothold
+### Lab 1: OSCP Multi-Tier Network Pivot & Full Attack Loop
 
-- **Domain**: `MEGACORP.LOCAL` / `HQ.MEGACORP.LOCAL`
-- **Initial Access**: Perimeter Web Landing Portal at `10.10.10.80`
-- **Key Vectors**: Web foothold $\rightarrow$ DMZ firewall bypass $\rightarrow$ PostgreSQL configuration file enumeration $\rightarrow$ Active Directory credential extraction $\rightarrow$ AS-REP Roasting & Kerberoasting $\rightarrow$ Domain takeover.
-- **Targets**:
-  - Perimeter Web UI: `10.10.10.80:80`
-  - Internal Database: `10.20.20.20:5432`
-  - Parent Domain Controller: `10.100.10.10:445`
-  - Child Domain Controller: `10.100.10.20:389`
+- **Domains**: `MEGACORP.LOCAL` / `HQ.MEGACORP.LOCAL`
+- **Initial Foothold**: External DMZ Web Gateway at `http://10.10.10.80:80`
+- **Attack Chain**:
+  1. **Perimeter Foothold**: Enumerate login portal $\rightarrow$ SQL Injection authentication bypass $\rightarrow$ Unrestricted file upload via document drop $\rightarrow$ obtain low-privilege `www-data` shell (`/home/www-data/local.txt`).
+  2. **Local Privilege Escalation**: Enumerate sudo misconfigurations / writable internal backup scripts $\rightarrow$ elevate to `root` (`/root/proof.txt`).
+  3. **Network Pivoting**: Discover pivot notes and credentials in `/root/pivot_notes.txt` $\rightarrow$ configure SSH dynamic port forwarding (`ssh -D 1080`) or Chisel tunnel into `10.20.20.0/24` and `10.100.10.0/24`.
+  4. **Database Credential Discovery**: Connect to PostgreSQL (`10.20.20.20:5432`) $\rightarrow$ extract Active Directory LDAP sync service account credentials.
+  5. **Active Directory Exploitation**: AS-REP Roasting & Kerberoasting against HQ Child DC $\rightarrow$ exploit bidirectional forest trust $\rightarrow$ achieve Domain / Enterprise Admin compromise on Parent DC (`10.100.10.10`).
+- **Key Targets**:
+  - DMZ Web Server: `10.10.10.80:80` (HTTP) & `:22` (SSH Pivot)
+  - Internal PostgreSQL DB: `10.20.20.20:5432`
+  - Internal Redis Cache: `10.20.20.30:6379`
+  - Parent Forest DC: `10.100.10.10:445` (SMB)
+  - Child Forest DC: `10.100.10.20:389` (LDAP)
 
-### Lab 2: Multi-Domain Forest & Cross-Forest Trust Pivoting
+### Lab 2: Multi-Domain Forest & Trust Pivoting
 
-- **Domain**: `MEGACORP.LOCAL` / `HQ.MEGACORP.LOCAL` / `CYBERTECH.LOCAL`
-- **Initial Access**: Low-privileged user in child domain (`HQ.MEGACORP.LOCAL`) via `credentials.txt`
-- **Key Vectors**: Bidirectional Parent-Child trust enumeration $\rightarrow$ Enterprise Admins escalation $\rightarrow$ External Forest Trust boundary traversal to `CYBERTECH.LOCAL`.
-- **Targets**:
+- **Domains**: `MEGACORP.LOCAL` / `HQ.MEGACORP.LOCAL` / `CYBERTECH.LOCAL`
+- **Initial Access**: Low-privilege child domain user via dynamic wordlists
+- **Key Vectors**: Bidirectional Parent-Child trust enumeration $\rightarrow$ Enterprise Admins escalation $\rightarrow$ External Forest Trust boundary traversal to partner tree domain.
+- **Key Targets**:
   - Forest Root DC (`MEGACORP.LOCAL`): `10.101.10.10:445`
   - Child DC (`HQ.MEGACORP.LOCAL`): `10.101.20.10:389`
   - Partner Tree DC (`CYBERTECH.LOCAL`): `10.101.30.10:88`
@@ -187,124 +262,152 @@ To prevent collisions, each lab utilizes dedicated subnets, domain names, and Wi
 
 - **Domain**: `ADCSLAB.LOCAL`
 - **Initial Access**: `l3_j.doe` / `StudentPass2026!`
-- **Key Vectors**: AD CS certificate template discovery (`Certipy find`) $\rightarrow$ Misconfigured `ENROLLEE_SUPPLIES_SUBJECT` (ESC1) $\rightarrow$ Requesting cert with custom SAN for Domain Admin $\rightarrow$ Kerberos PKINIT authentication for TGT / NT hash retrieval.
-- **Targets**:
+- **Key Vectors**: AD CS certificate template discovery (`Certipy find`) $\rightarrow$ Misconfigured `ENROLLEE_SUPPLIES_SUBJECT` (ESC1) $\rightarrow$ Request certificate with custom SAN for Domain Admin $\rightarrow$ Kerberos PKINIT authentication for TGT and NT hash retrieval.
+- **Key Targets**:
   - Domain Controller: `10.102.10.10:445`
   - CA Web Enrollment Service: `10.102.20.20:80`
 
 ### Lab 4: External Forest Trust & Foreign Security Principal (FSP) Abuse
 
 - **Domain**: `FORESTA.LOCAL` $\leftrightarrow$ `FORESTB.LOCAL`
-- **Initial Access**: `l4b_student` / `SimpleStudentPass2026!` (in Forest B)
-- **Key Vectors**: Cross-forest trust enumeration $\rightarrow$ Locating Foreign Security Principal (FSP) memberships in Forest A $\rightarrow$ Abusing `GenericWrite` permissions over Forest A administrative groups $\rightarrow$ Domain Admin takeover on Forest A DC.
-- **Targets**:
+- **Initial Access**: `l4b_student` / `SimpleStudentPass2026!` (Forest B)
+- **Key Vectors**: Cross-forest trust enumeration $\rightarrow$ Locate Foreign Security Principal (FSP) memberships in Forest A $\rightarrow$ Abuse `GenericWrite` permissions over administrative groups $\rightarrow$ WinRM remote command execution via Evil-WinRM (`10.103.20.30:5985`) $\rightarrow$ Domain takeover.
+- **Key Targets**:
   - Forest A DC (`FORESTA.LOCAL`): `10.103.10.10:445`
   - Forest B DC (`FORESTB.LOCAL`): `10.103.20.10:389`
-  - WinRM Target Machine: `10.103.20.30:5985`
+  - WinRM Target Server: `10.103.20.30:5985` (HTTP WinRM)
 
 ### Lab 5: Group Policy Object (GPO) Abuse & Workstation RCE
 
 - **Domain**: `GPOLAB.LOCAL`
 - **Initial Access**: `l5_operator` / `OperatorPass2026!`
-- **Key Vectors**: Inspecting GPO permissions $\rightarrow$ Identifying write access over GPO startup scripts on `SYSVOL` $\rightarrow$ Injecting administrative commands $\rightarrow$ Capturing reverse shell from automated workstation client.
-- **Targets**:
-  - Domain Controller (`GPOLAB.LOCAL`): `10.104.10.10:445`
-  - Client Workstation Simulator: `10.104.20.20`
+- **Key Vectors**: Inspect GPO permissions $\rightarrow$ Write access over GPO startup scripts on `SYSVOL` $\rightarrow$ Inject administrative command payload $\rightarrow$ Capture reverse shell from client workstation simulator (`10.104.20.20:5985`).
+- **Key Targets**:
+  - Domain Controller: `10.104.10.10:445`
+  - Workstation Simulator: `10.104.20.20:5985` (WinRM)
 
 ### Lab 6: Resource-Based Constrained Delegation (RBCD)
 
 - **Domain**: `RBCDLAB.LOCAL`
-- **Initial Access**: `l6_r.worker` / `WorkerPass2026!`
-- **Key Vectors**: Identifying write access over computer objects $\rightarrow$ Registering an attacker machine account via MachineAccountQuota $\rightarrow$ Modifying `msDS-AllowedToActOnBehalfOfOtherIdentity` $\rightarrow$ S4U2self + S4U2proxy impersonation $\rightarrow$ Host compromise.
-- **Targets**:
-  - Domain Controller (`RBCDLAB.LOCAL`): `10.105.10.10:445`
-  - Target Server (SSH/Web): `10.105.20.20:22`
+- **Initial Access**: Low-privileged domain user
+- **Key Vectors**: Write access over computer objects $\rightarrow$ MachineAccountQuota account registration $\rightarrow$ Configure `msDS-AllowedToActOnBehalfOfOtherIdentity` $\rightarrow$ S4U2self + S4U2proxy impersonation $\rightarrow$ Host compromise.
+- **Key Targets**:
+  - Domain Controller: `10.105.10.10:445`
+  - Target Server: `10.105.20.20:22`
 
 ### Lab 7: SQL Database Link Pivoting
 
 - **Domain**: `SQLPIVOT.LOCAL`
-- **Initial Access**: Access to frontend database network segment (`10.106.20.20`)
-- **Key Vectors**: Authenticating to frontend PostgreSQL instance $\rightarrow$ Discovering foreign data wrapper / database link (`postgres_fdw`) to isolated backend server $\rightarrow$ Cross-subnet query execution and code execution.
-- **Targets**:
-  - Domain Controller (`SQLPIVOT.LOCAL`): `10.106.10.10:445`
+- **Initial Access**: Frontend database network segment (`10.106.20.20:5432`)
+- **Key Vectors**: Authenticate to frontend PostgreSQL $\rightarrow$ Enumerate Foreign Data Wrapper (`postgres_fdw`) links $\rightarrow$ Cross-subnet query execution to isolated backend database (`10.106.10.20`) $\rightarrow$ Flag exfiltration.
+- **Key Targets**:
+  - Domain Controller: `10.106.10.10:445`
   - Frontend Database: `10.106.20.20:5432`
   - Isolated Backend Database: `10.106.10.20:5432`
 
 ### Lab 8: LAPS & Local Administrator Password Leakage
 
 - **Domain**: `LAPSLAB.LOCAL`
-- **Initial Access**: `l8_audit_user` / `AuditPass2026!`
-- **Key Vectors**: Performing LDAP search across Active Directory computer objects $\rightarrow$ Finding clear-text administrative passwords leaked in legacy description/comment attributes $\rightarrow$ Privilege escalation to local administrator.
-- **Targets**:
-  - Domain Controller (`LAPSLAB.LOCAL`): `10.107.10.10:445`
-  - Target Finance Server: `10.107.20.20:22`
+- **Initial Access**: Low-privileged audit account
+- **Key Vectors**: LDAP search across computer objects $\rightarrow$ Extract cleartext passwords stored in legacy/custom attributes $\rightarrow$ WinRM / Evil-WinRM access to finance server (`10.107.20.20:5985`) $\rightarrow$ Kerberos ticket caching abuse.
+- **Key Targets**:
+  - Domain Controller: `10.107.10.10:445`
+  - Target Finance Server: `10.107.20.20:5985` (WinRM) & `:22` (SSH)
 
 ### Lab 9: AD CS NTLM Relay (ESC8) & Coercion
 
 - **Domain**: `ESC8LAB.LOCAL`
-- **Initial Access**: `l9_student` / `StudentPass2026!`
-- **Key Vectors**: Locating unencrypted HTTP CA Web Enrollment endpoint (`/certsrv`) $\rightarrow$ Coercing authentication from the Domain Controller machine account $\rightarrow$ Relaying NTLM credentials to the CA $\rightarrow$ Obtaining Domain Controller certificate for DCSync.
-- **Targets**:
-  - Domain Controller (`ESC8LAB.LOCAL`): `10.108.10.10:445`
+- **Initial Access**: Low-privileged student account
+- **Key Vectors**: Unencrypted HTTP CA Web Enrollment (`/certsrv`) $\rightarrow$ Coerce DC authentication via PetitPotam/PrinterBug $\rightarrow$ Relay NTLM authentication to CA $\rightarrow$ Acquire DC machine certificate for DCSync.
+- **Key Targets**:
+  - Domain Controller: `10.108.10.10:445`
   - Certificate Authority Web Enrollment: `10.108.20.20:80`
 
 ### Lab 10: Kerberos Constrained Delegation (S4U)
 
 - **Domain**: `DELEGATELAB.LOCAL`
-- **Initial Access**: `l10_web_service` / `WebServPass123!`
-- **Key Vectors**: Enumerating Kerberos Constrained Delegation with Protocol Transition on service account $\rightarrow$ Performing S4U2self to forge TGS as Domain Admin $\rightarrow$ Performing S4U2proxy to access backend database service $\rightarrow$ Compromising target server.
-- **Targets**:
-  - Domain Controller (`DELEGATELAB.LOCAL`): `10.109.10.10:445`
-  - Target Database Server (SSH/Web): `10.109.20.20:22`
+- **Initial Access**: `l10_web_service` service account
+- **Key Vectors**: Kerberos Constrained Delegation with Protocol Transition $\rightarrow$ S4U2self to forge TGS as Domain Admin $\rightarrow$ S4U2proxy to access backend database service.
+- **Key Targets**:
+  - Domain Controller: `10.109.10.10:445`
+  - Backend Database Server: `10.109.20.20:22`
 
 ### Lab 11: Hybrid Cloud Identity & Azure AD Connect Sync Abuse
 
-- **Domain**: `MEGACORP-CLOUD.LOCAL` (NetBIOS: `MEGACLOUD`)
+- **Domain**: `MEGACORP-CLOUD.LOCAL`
 - **Initial Access**: HelpDesk Intern credentials (`l11_t.intern:InternPass2026!`) + Web Manager at `10.110.20.20:80`
-- **Key Vectors**: HelpDesk foothold $\rightarrow$ BloodHound ACL permission abuse $\rightarrow$ Local Administrator pivot on `hybrid-sync-srv` $\rightarrow$ Azure AD Connect LocalDB extraction $\rightarrow$ MSOL sync account decryption $\rightarrow$ DCSync attack against Domain Controller (`10.110.10.10`).
-- **Targets**:
+- **Key Vectors**: BloodHound ACL abuse $\rightarrow$ Local Administrator pivot on `hybrid-sync-srv` $\rightarrow$ Extract Azure AD Connect LocalDB $\rightarrow$ Decrypt MSOL sync service account password $\rightarrow$ DCSync against Domain Controller.
+- **Key Targets**:
   - Domain Controller SMB: `10.110.10.10:445`
-  - Domain Controller Kerberos: `10.110.10.10:88`
-  - Entra Connect Sync Web Manager: `10.110.20.20:80`
+  - Entra Connect Sync Web Portal: `10.110.20.20:80`
   - Entra Connect Sync SSH: `10.110.20.20:22`
 
-### Lab 12: SCCM/MECM Site Server Abuse & Multi-Tier Network Pivot
+### Lab 12: SCCM/MECM Site Server Abuse & Multi-Tier Pivot
 
-- **Domain**: `CORP-MANAGEMENT.LOCAL` (NetBIOS: `CORPMGMT`)
-- **Initial Access**: HelpDesk Intern credentials (`l12_j.intern:InternPass2026!`) + SCCM Distribution Share at `\\10.112.20.20\SMSPKGD$` + Web Portal at `10.112.20.20:80`.
-- **Key Vectors**: Network perimeter reconnaissance $\rightarrow$ Perimeter firewall drop detection on DC (`10.112.10.10`) $\rightarrow$ SCCM Distribution Point SMB enumeration $\rightarrow$ Network Access Account (NAA) extraction from `TSConfig.xml` $\rightarrow$ Foothold on `sccm-site-srv` (`10.112.20.20`) $\rightarrow$ Dynamic SSH SOCKS pivoting (`-D 1080`) bypassing network segmentation $\rightarrow$ Client Push installation account discovery $\rightarrow$ DCSync against Domain Controller $\rightarrow$ Flag capture.
-- **Targets**:
+- **Domain**: `CORP-MANAGEMENT.LOCAL`
+- **Initial Access**: HelpDesk Intern credentials + SMB Distribution Share (`\\10.112.20.20\SMSPKGD$`) + Web Portal at `10.112.20.20:80`
+- **Key Vectors**: Perimeter firewall bypass $\rightarrow$ SCCM distribution share enumeration $\rightarrow$ Extract Network Access Account (NAA) credentials from `TSConfig.xml` $\rightarrow$ Foothold on `sccm-site-srv` $\rightarrow$ Dynamic SSH SOCKS pivoting (`-D 1080`) $\rightarrow$ Client Push installation account discovery $\rightarrow$ Domain takeover.
+- **Key Targets**:
   - Domain Controller SMB: `10.112.10.10:445` (Firewalled from perimeter)
-  - Domain Controller Kerberos: `10.112.10.10:88` (Firewalled from perimeter)
   - SCCM Distribution Point SMB: `10.112.20.20:445`
-  - MECM Management Point Web Portal: `10.112.20.20:80`
+  - MECM Management Web Portal: `10.112.20.20:80`
   - SCCM Site Server SSH (Pivot Host): `10.112.20.20:22`
 
 ---
 
 ## CLI Reference
 
-The `adlabs.py` utility supports both interactive and headless CLI operations:
+### Subcommands
+
+```bash
+adlabs [command] [arguments]
+```
+
+| Subcommand | Description | Example |
+| :--- | :--- | :--- |
+| `status` | Display live status table of all 12 labs | `python3 adlabs.py status` |
+| `deploy <id\|all>` | Start and provision containers for a lab | `python3 adlabs.py deploy 1` |
+| `stop <id\|all>` | Halt running containers (preserves volume state) | `python3 adlabs.py stop 1` |
+| `clean <id\|all>` | Destroy containers and wipe data volumes | `python3 adlabs.py clean 1` |
+| `info <id\|all>` | Display detailed lab objectives, targets, and credentials | `python3 adlabs.py info 1` |
+| `test <id\|all>` | Probe service reachability and container health | `python3 adlabs.py test 1` |
+| `connect <id>` | Connect WireGuard tunnel for a lab | `python3 adlabs.py connect 1` |
+| `disconnect` | Disconnect active WireGuard tunnel | `python3 adlabs.py disconnect` |
+| `submit <flag>` | Submit captured `local.txt` or `proof.txt` flag | `python3 adlabs.py submit OSCP{...}` |
+| `flags` | Display flags scoreboard and earned points | `python3 adlabs.py flags` |
+| `hint <id> [tier]` | Request progressive hints for a lab (Tier 1-4) | `python3 adlabs.py hint 1` |
+| `exam <action>` | Manage 24-hour OSCP Mock Exam (`start`, `status`, `stop`) | `python3 adlabs.py exam status` |
+| `wordlists` | Regenerate dynamic wordlists (`--randomize` for fresh passwords) | `python3 adlabs.py wordlists -r` |
+
+### Command Flags
 
 ```
-usage: adlabs.py [-h] [--all] [--lab LAB] [--stop-all] [--stop STOP]
-                 [--clean-all] [--clean CLEAN] [--test-all] [--test TEST]
-                 [--generate-wordlists] [--gen-vpn GEN_VPN]
-
-Manage AD Labs setup, provisioning, and connectivity.
-
 options:
   -h, --help            Show this help message and exit
-  --all, -a             Start and provision all 10 labs simultaneously
-  --lab, -l LAB         Start and provision a specific lab (by name or 1-10 index)
+  --all, -a             Start and provision all 12 labs simultaneously
+  --lab, -l LAB         Start and provision a specific lab (by name or 1-12 index)
+  --status, -s          Show live status summary overview of all 12 labs
+  --info, -i INFO       Show detailed info, credentials, and targets for a lab
   --stop-all            Stop all running labs
-  --stop STOP           Stop a specific lab (by name or 1-10 index)
+  --stop STOP           Stop a specific lab (by name or 1-12 index)
   --clean-all           Stop and remove volumes for all labs (complete data reset)
   --clean CLEAN         Stop and remove volumes for a specific lab
   --test-all            Test network connectivity and health of all labs
   --test TEST           Test connectivity and health of a specific lab
+  --connect, -c CONN    Connect WireGuard VPN tunnel for a lab
+  --disconnect, -d DISC Disconnect WireGuard VPN tunnel for a lab
+  --submit FLAG         Submit a captured flag (local.txt or proof.txt)
+  --hint HINT           Request progressive hint for a lab (1-12 or name)
+  --flags               Show flag progress and score breakdown
+  --exam [ACTION]       OSCP Mock Exam simulator (start, status, stop)
   --generate-wordlists  Generate or recreate user and password wordlists
+  --randomize, -r       Randomize credentials when generating wordlists
   --gen-vpn GEN_VPN     Generate or regenerate VPN profiles (or 'all')
+  --set-host SET_HOST   Set persistent Host IP or DDNS Domain and update profiles
+  --update-ip           Auto-detect current public/local IP and update all deployed labs
+  --host HOST           Override Host IP/Domain for current command
+  --list-labs           Print available labs list cleanly
+  --count-labs          Print total lab count (12)
 ```
 
 ---
@@ -313,35 +416,23 @@ options:
 
 > [!WARNING]
 > **Resource Limits on Docker Desktop / WSL2**  
-> Running all 10 labs simultaneously requires at least **4–6 GB of RAM** allocated to Docker/WSL2. If your Docker environment is limited to 2 GB, deploy labs individually (`python adlabs.py --lab <id>`) or increase your WSL2 memory allocation via `.wslconfig`:
-> ```ini
-> [wsl2]
-> memory=8GB
-> ```
+> Running all 12 labs simultaneously requires at least **6–8 GB of RAM** allocated to Docker/WSL2. For typical practice sessions, deploy labs individually (`python3 adlabs.py deploy <id>`) to conserve system resources.
 
 ### WireGuard Handshake Fails
 
 - Verify that your host's local IP address matches the `Endpoint` in your `.conf` file.
-- If your IP changed, run:
+- If your IP changed (e.g. Wi-Fi switch), run:
   ```bash
-  python adlabs.py --gen-vpn <lab_number>
+  python3 adlabs.py --gen-vpn <lab_number>
   ```
-- Ensure UDP traffic on the assigned port (e.g., `51820–51829`) is allowed by your host firewall.
+- Ensure UDP traffic on the assigned port (`51820–51831`) is permitted through your host firewall.
 
 ### Cannot Reach Domain Names
 
-- The WireGuard `.conf` configuration includes an automated DNS router (`adlabs-dns`).
-- If domain resolution fails on your attacker system, use the target's direct IP address or add the entry to `/etc/hosts`:
+- The WireGuard `.conf` configuration includes an automated DNS router container (`adlabs-dns`).
+- If domain resolution fails on your attacker system, use the target's direct IP address or append the entry to `/etc/hosts`:
   ```
   10.100.10.10 megacorp.local dc.megacorp.local
-  ```
-
-### Container Health Check Timeouts
-
-- Samba Domain Controllers initialize their Kerberos KDC and database during first boot, which can take up to 60–90 seconds.
-- The script automatically polls until the healthcheck returns `healthy`. If a container fails to start, inspect its recent logs:
-  ```bash
-  docker logs --tail 50 <container_name>
   ```
 
 ### Resetting a Corrupted Lab
@@ -349,6 +440,6 @@ options:
 If an interrupted setup leaves a container in an inconsistent state, completely clean and redeploy the specific lab:
 
 ```bash
-python adlabs.py --clean 4
-python adlabs.py --lab 4
+python3 adlabs.py clean 1
+python3 adlabs.py deploy 1
 ```
